@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# Personal data must NEVER be committed. This repository is intended to become
+# public; everything below either is, or may contain, real athlete data.
+# ---------------------------------------------------------------------------
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Secrets and OAuth tokens
+.env
+.env.*
+!.env.example
+*token*.json
+*tokens*.json
+secrets/
+
+# Generated reports and exports
+reports/
+exports/
+*.html
+!docs/**/*.html
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
