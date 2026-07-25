@@ -108,5 +108,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# Import the package from src/ directly, so the suite does not depend on the
+# project having been installed into the active environment.
+pythonpath = ["src"]
 addopts = "-ra --strict-markers --strict-config"
 filterwarnings = ["error"]
