@@ -57,6 +57,59 @@ def test_stream_upsert_is_keyed_on_time_offset(store: Store, activity: Activity)
     assert rows[0]["hr"] == 130.0
 
 
+def test_rr_write_preserves_the_rest_of_a_stream_row(store: Store, activity: Activity) -> None:
+    """Beat data arrives after the streams API has already filled the row.
+
+    Writing it through the ordinary stream upsert would blank heart rate and
+    velocity, so R-R gets its own write that touches only its column.
+    """
+    store.upsert_activities([activity])
+    key = (activity.source, activity.external_id)
+    store.upsert_streams(*key, [StreamPoint(t_s=0, hr=142.0, velocity=3.4, distance_m=3.4)])
+
+    written = store.upsert_stream_rr(*key, {0: 402.5})
+
+    row = store.conn.execute("SELECT * FROM activity_streams WHERE t_s = 0").fetchone()
+    assert written == 1
+    assert row["rr_ms"] == 402.5
+    assert row["hr"] == 142.0
+    assert row["velocity"] == 3.4
+
+
+def test_rr_write_inserts_seconds_the_streams_did_not_cover(
+    store: Store, activity: Activity
+) -> None:
+    """Beat data can run past the last stream sample, and is still kept."""
+    store.upsert_activities([activity])
+    key = (activity.source, activity.external_id)
+    store.upsert_streams(*key, [StreamPoint(t_s=0, hr=142.0)])
+
+    store.upsert_stream_rr(*key, {0: 400.0, 1: 410.0, 2: 405.0})
+
+    rows = store.conn.execute("SELECT t_s, hr, rr_ms FROM activity_streams ORDER BY t_s").fetchall()
+    assert [row["t_s"] for row in rows] == [0, 1, 2]
+    assert rows[1]["hr"] is None
+    assert rows[1]["rr_ms"] == 410.0
+
+
+def test_rr_write_for_unknown_activity_is_dropped(store: Store) -> None:
+    assert store.upsert_stream_rr(Source.INTERVALS, "nope", {0: 400.0}) == 0
+
+
+def test_activities_with_rr_reports_only_those_holding_beats(
+    store: Store, activity: Activity
+) -> None:
+    """This is what stops a sync re-downloading files it already has."""
+    other = activity.model_copy(update={"external_id": "4243"})
+    store.upsert_activities([activity, other])
+    store.upsert_streams(activity.source, activity.external_id, [StreamPoint(t_s=0, hr=140.0)])
+    store.upsert_streams(other.source, other.external_id, [StreamPoint(t_s=0, hr=150.0)])
+
+    store.upsert_stream_rr(activity.source, activity.external_id, {0: 400.0})
+
+    assert store.activities_with_rr(activity.source) == {activity.external_id}
+
+
 def test_streams_for_unknown_activity_are_dropped(store: Store) -> None:
     """Streams without a parent activity are refused, not orphaned."""
     written = store.upsert_streams(Source.STRAVA, "999999", [StreamPoint(t_s=0, hr=120.0)])

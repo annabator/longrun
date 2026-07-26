@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from longrun.errors import IngestError
-from longrun.ingest.fit import FitFolderIngester, activity_key, iter_fit_files
+from longrun.ingest.fit import (
+    FitFolderIngester,
+    activity_key,
+    iter_fit_files,
+    read_rr_by_second,
+)
 from longrun.ingest.fit.reader import _activity_from_session, _rr_by_second, read_fit_file
 from longrun.store import Store
 
@@ -93,6 +98,12 @@ def test_two_exports_of_one_run_share_an_identity(tmp_path: Path) -> None:
 def test_a_session_without_a_start_time_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(IngestError, match="session start time"):
         _activity_from_session({"sport": "running"}, tmp_path / "x.fit")
+
+
+def test_rr_from_bytes_rejects_a_broken_file() -> None:
+    """A downloaded file with a FIT header but no valid body is caught."""
+    with pytest.raises(IngestError, match="Could not parse"):
+        read_rr_by_second(b"\x00" * 8 + b".FIT" + b"garbage")
 
 
 def test_missing_folder_is_a_clear_error(tmp_path: Path, store: Store) -> None:

@@ -13,6 +13,7 @@ the record sample whose second they fall in, which keeps one row per second in
 """
 
 import datetime as dt
+import io
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,36 @@ def read_fit_file(path: Path) -> tuple[Activity, list[StreamPoint]]:
     activity = _activity_from_session(session, path)
     points = _stream_points(records, activity.start_time, rr_intervals)
     return activity, points
+
+
+def read_rr_by_second(data: bytes) -> dict[int, float]:
+    """Extract only the R-R intervals from FIT bytes, keyed by elapsed second.
+
+    Used when the FIT arrives from the Intervals.icu API purely to recover
+    beat data. Everything else in the file is ignored, because the activity
+    and its per-second streams already came from the API and are richer than
+    what a regenerated FIT tends to carry.
+
+    Args:
+        data: The contents of a FIT file.
+
+    Returns:
+        A mapping of elapsed second to mean R-R interval in milliseconds,
+        empty if the file carries no beat data.
+
+    Raises:
+        IngestError: If the bytes cannot be parsed as FIT.
+    """
+    intervals: list[float] = []
+    try:
+        with fitdecode.FitReader(io.BytesIO(data)) as reader:
+            for frame in reader:
+                if isinstance(frame, fitdecode.FitDataMessage) and frame.name == "hrv":
+                    intervals.extend(_hrv_intervals(frame))
+    except (fitdecode.FitError, ValueError, EOFError) as exc:
+        msg = f"Could not parse the downloaded FIT file: {exc}"
+        raise IngestError(msg) from exc
+    return _rr_by_second(intervals)
 
 
 def iter_fit_files(folder: Path) -> Iterator[Path]:

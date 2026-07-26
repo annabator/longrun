@@ -114,8 +114,16 @@ erase a resting HR that came from a different export.
 | Activities + streams | ✅ | ✅ | – |
 | feel / RPE / load | ✅ | – | – |
 | Daily wellness, CTL/ATL/form | ✅ | – | ✅ |
-| Beat-to-beat R-R | – | ✅ | – |
+| Beat-to-beat R-R | ✅ via file download | ✅ | – |
 | Weight, VO₂max, bloods, parkrun | – | – | ✅ |
+
+R-R intervals are not in the Intervals.icu streams API, so `ingest intervals`
+downloads each activity's file and reads the beats out of it. The original
+upload is tried first, since it is what the watch actually wrote; the
+Intervals-generated FIT is the fallback for activities uploaded as GPX or TCX.
+That download is the largest request the adapter makes and only happens once
+per activity, but `--no-rr` skips it for a quick sync. `ingest fit` remains for
+files from anywhere else.
 
 VO₂max is source-dependent: some watches estimate it and pass it through,
 others never produce one. longrun does not assume it exists – if your watch
@@ -166,14 +174,17 @@ from then on.
 ## Usage
 
 ```bash
-# The default: activities, streams and daily wellness. Incremental and safe
-# to repeat.
+# The default: activities, streams, daily wellness and R-R intervals.
+# Incremental and safe to repeat.
 uv run longrun ingest intervals
 
 # A cautious first run
-uv run longrun ingest intervals --limit 10 --no-streams
+uv run longrun ingest intervals --limit 10 --no-streams --no-rr
 
-# Parse FIT exports from data/raw, the only source of beat-to-beat R-R
+# Skip the per-activity file download for a quick sync
+uv run longrun ingest intervals --no-rr
+
+# Parse FIT exports sitting in data/raw, for files from anywhere else
 uv run longrun ingest fit
 
 # Backfill history from spreadsheets

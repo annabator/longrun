@@ -7,7 +7,9 @@ resumes from where it stopped.
 
 import datetime as dt
 
+from longrun.errors import IngestError, LongrunError
 from longrun.ingest.base import IngestSummary, Progress
+from longrun.ingest.fit.reader import read_rr_by_second
 from longrun.ingest.intervals.client import IntervalsClient, today_utc
 from longrun.ingest.intervals.mapper import (
     activity_from_payload,
@@ -40,6 +42,7 @@ class IntervalsIngester:
         since: dt.date | None = None,
         with_streams: bool = True,
         with_wellness: bool = True,
+        with_rr: bool = True,
         limit: int | None = None,
     ) -> None:
         """Configure a run.
@@ -50,12 +53,18 @@ class IntervalsIngester:
                 latest stored Intervals activity.
             with_streams: Whether to fetch per-activity streams.
             with_wellness: Whether to fetch daily wellness.
+            with_rr: Whether to download each activity's FIT file for the
+                beat-to-beat intervals the streams API does not expose. This
+                is the largest request the adapter makes, and an activity
+                recorded without a chest strap will not have any, so it is
+                worth turning off for a fast sync.
             limit: Stop after this many activities.
         """
         self._client = client
         self._since = since
         self._with_streams = with_streams
         self._with_wellness = with_wellness
+        self._with_rr = with_rr
         self._limit = limit
 
     def ingest(self, store: Store, *, progress: Progress | None = None) -> IngestSummary:
@@ -82,10 +91,12 @@ class IntervalsIngester:
         already_have_streams = (
             store.stored_stream_activity_ids(self.source) if self._with_streams else set()
         )
+        already_have_rr = store.activities_with_rr(self.source) if self._with_rr else set()
         activities = 0
         with_stream_data = 0
         stream_points = 0
         skipped = 0
+        rr_activities = 0
 
         for payload in self._client.iter_activities(oldest):
             activity = activity_from_payload(payload)
@@ -106,9 +117,15 @@ class IntervalsIngester:
                         )
                         with_stream_data += 1
 
+            if self._with_rr and activity.external_id not in already_have_rr:
+                rr_activities += self._ingest_rr(store, activity.external_id, report)
+
             if self._limit is not None and activities >= self._limit:
                 report(f"Reached the requested limit of {self._limit} activities")
                 break
+
+        if self._with_rr:
+            report(f"Recovered beat-to-beat intervals for {rr_activities} activities")
 
         return IngestSummary(
             activities=activities,
@@ -116,6 +133,45 @@ class IntervalsIngester:
             stream_points=stream_points,
             streams_skipped=skipped,
         )
+
+    def _ingest_rr(self, store: Store, external_id: str, report: Progress) -> int:
+        """Download one activity's FIT file and store its R-R intervals.
+
+        Returns 0 rather than raising when an activity has no beat data:
+        anything recorded without a chest strap simply has none, which is
+        normal and must not interrupt a sync.
+
+        Args:
+            store: Destination store.
+            external_id: Intervals.icu identifier of the activity.
+            report: Progress callback.
+
+        Returns:
+            1 if beat data was stored, 0 otherwise.
+        """
+        try:
+            data = self._client.fetch_activity_fit(external_id)
+        except LongrunError as exc:
+            # A single unavailable file must not end a sync that has already
+            # written activities and wellness.
+            report(f"    could not fetch the activity file: {exc}")
+            return 0
+        if data is None:
+            return 0
+
+        try:
+            rr_by_second = read_rr_by_second(data)
+        except IngestError as exc:
+            report(f"    activity file could not be parsed: {exc}")
+            return 0
+        if not rr_by_second:
+            return 0
+
+        written = store.upsert_stream_rr(self.source, external_id, rr_by_second)
+        if written:
+            report(f"    {written} seconds of beat-to-beat intervals")
+            return 1
+        return 0
 
     def _ingest_wellness(self, store: Store, report: Progress) -> IngestSummary:
         """Fetch daily wellness, refreshing the recent rolling figures."""

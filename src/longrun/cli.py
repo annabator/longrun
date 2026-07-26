@@ -120,10 +120,19 @@ def ingest_intervals_command(
         bool,
         typer.Option("--wellness/--no-wellness", help="Also fetch daily wellness."),
     ] = True,
+    rr: Annotated[
+        bool,
+        typer.Option(
+            "--rr/--no-rr",
+            help="Also download each activity file for beat-to-beat R-R intervals. "
+            "The largest request made; use --no-rr for a quick sync.",
+        ),
+    ] = True,
 ) -> None:
-    """Pull activities, streams and daily wellness from Intervals.icu.
+    """Pull activities, streams, wellness and R-R intervals from Intervals.icu.
 
-    This is the default source. Re-running is safe and incremental.
+    This is the default source. Re-running is safe and incremental: streams
+    and beat data are fetched once per activity, not on every sync.
     """
     settings = _settings(ctx)
     with _friendly_errors(), Store.open(settings.database) as store:
@@ -135,6 +144,7 @@ def ingest_intervals_command(
                 since=since.date() if since is not None else None,
                 with_streams=streams,
                 with_wellness=wellness,
+                with_rr=rr,
                 limit=limit,
             )
             summary = ingester.ingest(store, progress=typer.echo)

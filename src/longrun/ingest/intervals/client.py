@@ -10,6 +10,7 @@ gives up with a clear message rather than hammering someone else's server.
 """
 
 import datetime as dt
+import gzip
 import time
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
@@ -42,6 +43,18 @@ _BACKOFF_BASE_S = 2.0
 _REQUEST_TIMEOUT_S = 60.0
 _PAGE_DAYS = 180
 """Window size when walking history; the API returns a date range, not pages."""
+
+_FILE_TIMEOUT_S = 120.0
+"""Activity files are far larger than a JSON payload, so they get longer."""
+
+_GZIP_MAGIC = b"\x1f\x8b"
+_FIT_MAGIC = b".FIT"
+
+_CREDENTIALS_MESSAGE = (
+    "Intervals.icu rejected the credentials. Check INTERVALS_ATHLETE_ID "
+    "and INTERVALS_API_KEY in your .env; the key is the one on "
+    "https://intervals.icu/settings."
+)
 
 
 class IntervalsClient:
@@ -144,9 +157,77 @@ class IntervalsClient:
                 records.extend(item for item in payload if isinstance(item, dict))
         return records
 
+    def fetch_activity_fit(self, activity_id: str) -> bytes | None:
+        """Download an activity's FIT file, for the R-R the streams API omits.
+
+        Two endpoints exist and they are not equivalent. `/file` returns the
+        file as originally uploaded, gzip-compressed, and is the faithful one -
+        but it is whatever the device sent, so it may be a GPX or TCX with no
+        beat data in it at all. `/fit-file` returns a FIT that Intervals.icu
+        generated from its own model, which is always a FIT but has been
+        through a round trip.
+
+        The original is tried first and the generated file is the fallback,
+        so the most faithful source available is the one used.
+
+        Args:
+            activity_id: Intervals.icu identifier of the activity.
+
+        Returns:
+            Decompressed FIT bytes, or None if neither endpoint yields one.
+        """
+        for path in (f"/activity/{activity_id}/file", f"/activity/{activity_id}/fit-file"):
+            payload = self._get_bytes(path)
+            if payload is None:
+                continue
+            data = _maybe_gunzip(payload)
+            if _looks_like_fit(data):
+                return data
+        return None
+
     def close(self) -> None:
         """Close the underlying HTTP connection pool."""
         self._http.close()
+
+    def _get_bytes(self, path: str) -> bytes | None:
+        """GET a binary body, returning None when the file is not available.
+
+        Args:
+            path: Path relative to the API root.
+
+        Returns:
+            The raw response body, or None on 404 or an empty response.
+
+        Raises:
+            AuthError: If the credentials are rejected.
+            RateLimitError: If retries are exhausted.
+        """
+        for attempt in range(self._max_retries):
+            response = self._http.get(
+                f"{API_BASE_URL}{path}",
+                auth=self._auth,
+                timeout=_FILE_TIMEOUT_S,
+                follow_redirects=True,
+            )
+
+            if response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):
+                raise AuthError(_CREDENTIALS_MESSAGE)
+            if response.status_code == httpx.codes.NOT_FOUND:
+                return None
+            if response.status_code == httpx.codes.TOO_MANY_REQUESTS or (
+                response.status_code >= httpx.codes.INTERNAL_SERVER_ERROR
+            ):
+                self._sleep(_backoff_seconds(response, attempt))
+                continue
+
+            response.raise_for_status()
+            return response.content or None
+
+        msg = (
+            f"Gave up on {path} after {self._max_retries} attempts. Already-ingested "
+            f"data has been saved; re-run to resume."
+        )
+        raise RateLimitError(msg)
 
     def _get(self, path: str, params: dict[str, Any], *, missing_ok: bool = False) -> Any:
         """Perform a GET against the API, retrying on rate limits and 5xx.
@@ -173,12 +254,7 @@ class IntervalsClient:
             )
 
             if response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):
-                msg = (
-                    "Intervals.icu rejected the credentials. Check INTERVALS_ATHLETE_ID "
-                    "and INTERVALS_API_KEY in your .env; the key is the one on "
-                    "https://intervals.icu/settings."
-                )
-                raise AuthError(msg)
+                raise AuthError(_CREDENTIALS_MESSAGE)
             if missing_ok and response.status_code == httpx.codes.NOT_FOUND:
                 return {}
             if response.status_code == httpx.codes.TOO_MANY_REQUESTS or (
@@ -195,6 +271,29 @@ class IntervalsClient:
             f"data has been saved; re-run to resume."
         )
         raise RateLimitError(msg)
+
+
+def _maybe_gunzip(payload: bytes) -> bytes:
+    """Decompress `payload` if it is gzipped, otherwise return it unchanged.
+
+    The original-file endpoint serves gzip whether or not the response
+    advertises it, so the magic number is checked rather than the header.
+    """
+    if not payload.startswith(_GZIP_MAGIC):
+        return payload
+    try:
+        return gzip.decompress(payload)
+    except (OSError, EOFError):
+        return payload
+
+
+def _looks_like_fit(payload: bytes) -> bool:
+    """Return whether `payload` carries the FIT header marker.
+
+    A FIT file writes the ASCII bytes `.FIT` at offset 8. Checking guards
+    against handing a GPX, a TCX or an error page to the parser.
+    """
+    return payload[8:12] == _FIT_MAGIC
 
 
 def today_utc() -> dt.date:

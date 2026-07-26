@@ -1,5 +1,6 @@
 """End-to-end Intervals ingestion against a mocked API."""
 
+import gzip
 import json
 from pathlib import Path
 from typing import Any
@@ -17,31 +18,38 @@ def _fixture(name: str) -> Any:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
-def _handler(calls: list[str]) -> httpx.MockTransport:
+def _handler(
+    calls: list[str], *, files: dict[str, httpx.Response] | None = None
+) -> httpx.MockTransport:
     """Serve the fixtures, recording which paths were asked for."""
+    file_responses = files or {}
 
     def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("/activities"):
+        path = request.url.path
+        calls.append(path)
+        if path.endswith("/activities"):
             # Only the first window carries data; later windows are empty, so
             # the walk terminates the way it would against the real API.
-            served = any(path.endswith("/activities") for path in calls[:-1])
+            served = any(other.endswith("/activities") for other in calls[:-1])
             return httpx.Response(200, json=[] if served else _fixture("intervals_activities.json"))
-        if request.url.path.endswith("/wellness"):
-            served = any(path.endswith("/wellness") for path in calls[:-1])
+        if path.endswith("/wellness"):
+            served = any(other.endswith("/wellness") for other in calls[:-1])
             return httpx.Response(200, json=[] if served else _fixture("intervals_wellness.json"))
-        if request.url.path.endswith("/streams"):
+        if path.endswith("/streams"):
             return httpx.Response(200, json=_fixture("intervals_streams.json"))
+        for suffix, response in file_responses.items():
+            if path.endswith(suffix):
+                return response
         return httpx.Response(404, json={})
 
     return httpx.MockTransport(handle)
 
 
-def _client(calls: list[str]) -> IntervalsClient:
+def _client(calls: list[str], *, files: dict[str, httpx.Response] | None = None) -> IntervalsClient:
     return IntervalsClient(
         "i1234",
         "secret-key",
-        http=httpx.Client(transport=_handler(calls)),
+        http=httpx.Client(transport=_handler(calls, files=files)),
         sleep=lambda _: None,
     )
 
@@ -133,6 +141,82 @@ def test_second_run_skips_activities_that_already_have_streams(store: Store) -> 
 
     assert summary.streams_skipped == 3
     assert not any(path.endswith("/streams") for path in calls)
+
+
+def _fake_fit(payload: bytes = b"") -> bytes:
+    """Bytes carrying the FIT header marker, for testing the transport only.
+
+    The client decides what to keep by the header, and the parser is exercised
+    separately, so these need the marker rather than a valid body.
+    """
+    return b"\x00" * 8 + b".FIT" + payload
+
+
+def test_rr_download_is_skipped_when_disabled(store: Store) -> None:
+    calls: list[str] = []
+
+    IntervalsIngester(_client(calls), with_rr=False).ingest(store)
+
+    assert not any("file" in path for path in calls)
+
+
+def test_rr_download_prefers_the_original_file(store: Store) -> None:
+    """The original upload is the faithful one, so it is asked for first."""
+    calls: list[str] = []
+    files = {"/file": httpx.Response(200, content=_fake_fit())}
+
+    IntervalsIngester(_client(calls, files=files), limit=1).ingest(store)
+
+    assert any(path.endswith("/file") for path in calls)
+    # The generated fallback is not needed once the original arrives.
+    assert not any(path.endswith("/fit-file") for path in calls)
+
+
+def test_rr_download_falls_back_to_the_generated_fit(store: Store) -> None:
+    """An original that is a GPX carries no beat data, so the FIT is tried."""
+    calls: list[str] = []
+    files = {
+        "/file": httpx.Response(200, content=b"<?xml version='1.0'?><gpx></gpx>"),
+        "/fit-file": httpx.Response(200, content=_fake_fit()),
+    }
+
+    IntervalsIngester(_client(calls, files=files), limit=1).ingest(store)
+
+    assert any(path.endswith("/fit-file") for path in calls)
+
+
+def test_gzipped_activity_file_is_decompressed() -> None:
+    """The original-file endpoint serves gzip whether or not it says so."""
+    calls: list[str] = []
+    files = {"/file": httpx.Response(200, content=gzip.compress(_fake_fit()))}
+    client = _client(calls, files=files)
+
+    data = client.fetch_activity_fit("i84213770")
+
+    assert data is not None
+    assert data.startswith(b"\x00" * 8 + b".FIT")
+
+
+def test_missing_activity_file_is_not_an_error(store: Store) -> None:
+    """Most activities have no file to serve; a sync must not stop for it."""
+    calls: list[str] = []
+
+    summary = IntervalsIngester(_client(calls)).ingest(store)
+
+    assert summary.activities == 3
+    assert store.counts()["activities"] == 3
+
+
+def test_unparseable_activity_file_is_reported_not_fatal(store: Store) -> None:
+    """A file with a FIT header but a broken body must not end the run."""
+    calls: list[str] = []
+    files = {"/file": httpx.Response(200, content=_fake_fit(b"not really a fit body"))}
+    lines: list[str] = []
+
+    summary = IntervalsIngester(_client(calls, files=files)).ingest(store, progress=lines.append)
+
+    assert summary.activities == 3
+    assert any("could not be parsed" in line for line in lines)
 
 
 def test_rows_are_labelled_with_their_source(store: Store) -> None:

@@ -14,7 +14,7 @@ source is safe and produces no duplicates:
 
 import datetime as dt
 import sqlite3
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Self
@@ -61,6 +61,15 @@ ON CONFLICT (activity_id, t_s) DO UPDATE SET
     -- R-R comes from FIT files, which may be ingested after Intervals.icu
     -- has already supplied the rest of the stream; keep whichever has it.
     rr_ms      = COALESCE(excluded.rr_ms, activity_streams.rr_ms)
+"""
+
+# Writes beat data onto rows that already exist without disturbing them. The
+# ordinary stream upsert replaces every column, so using it here would blank
+# the heart rate and velocity the streams API supplied.
+_STREAM_RR_UPSERT = """
+INSERT INTO activity_streams (activity_id, t_s, rr_ms)
+VALUES (?, ?, ?)
+ON CONFLICT (activity_id, t_s) DO UPDATE SET rr_ms = excluded.rr_ms
 """
 
 _WELLNESS_UPSERT = """
@@ -186,6 +195,31 @@ class Store:
             self.conn.executemany(_STREAM_UPSERT, rows)
         return len(rows)
 
+    def upsert_stream_rr(
+        self, source: str, external_id: str, rr_by_second: Mapping[int, float]
+    ) -> int:
+        """Attach beat-to-beat intervals to an activity's existing streams.
+
+        Only `rr_ms` is written, so heart rate, velocity and the rest of a
+        stream row survive untouched. Samples for seconds with no stream row
+        yet are inserted, since beat data can extend past the last sample.
+
+        Args:
+            source: Adapter that produced the parent activity.
+            external_id: The provider's identifier for it.
+            rr_by_second: Elapsed second to mean R-R interval, in milliseconds.
+
+        Returns:
+            The number of samples written; zero if the activity is unknown.
+        """
+        activity_id = self.activity_row_id(source, external_id)
+        if activity_id is None:
+            return 0
+        rows = [(activity_id, second, rr_ms) for second, rr_ms in sorted(rr_by_second.items())]
+        with self.conn:
+            self.conn.executemany(_STREAM_RR_UPSERT, rows)
+        return len(rows)
+
     def upsert_wellness(self, days: Iterable[WellnessDay]) -> int:
         """Insert or merge daily wellness rows, keyed on `date`.
 
@@ -309,6 +343,29 @@ class Store:
             FROM activities a
             JOIN activity_streams s ON s.activity_id = a.id
             WHERE a.source = ?
+            """,
+            (source,),
+        ).fetchall()
+        return {str(row["external_id"]) for row in rows}
+
+    def activities_with_rr(self, source: str) -> set[str]:
+        """Return the external ids of one source's activities that hold R-R.
+
+        Lets ingestion skip re-downloading an activity file, which is by far
+        the largest request the adapter makes.
+
+        Args:
+            source: Adapter to report on.
+
+        Returns:
+            A set of `external_id` values.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT a.external_id AS external_id
+            FROM activities a
+            JOIN activity_streams s ON s.activity_id = a.id
+            WHERE a.source = ? AND s.rr_ms IS NOT NULL
             """,
             (source,),
         ).fetchall()
