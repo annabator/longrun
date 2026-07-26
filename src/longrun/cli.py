@@ -124,15 +124,20 @@ def ingest_intervals_command(
         bool,
         typer.Option(
             "--rr/--no-rr",
-            help="Also download each activity file for beat-to-beat R-R intervals. "
-            "The largest request made; use --no-rr for a quick sync.",
+            help="Download each activity file for beat-to-beat R-R intervals. "
+            "Off by default: it is the largest request made and nothing "
+            "consumes the data yet.",
         ),
-    ] = True,
+    ] = False,
 ) -> None:
-    """Pull activities, streams, wellness and R-R intervals from Intervals.icu.
+    """Pull activities, streams and daily wellness from Intervals.icu.
 
     This is the default source. Re-running is safe and incremental: streams
-    and beat data are fetched once per activity, not on every sync.
+    are fetched once per activity, not on every sync.
+
+    Beat-to-beat R-R intervals are available with `--rr` but off by default,
+    since downloading an activity file per run is expensive and nothing reads
+    the result yet.
     """
     settings = _settings(ctx)
     with _friendly_errors(), Store.open(settings.database) as store:

@@ -25,8 +25,8 @@ DEFAULT_HISTORY_DAYS = 365 * 3
 _WELLNESS_REFRESH_DAYS = 60
 """Re-fetch this much recent wellness on every run.
 
-CTL, ATL and form are rolling figures that Intervals.icu revises as later
-activities land, so the most recent weeks are refetched rather than trusted.
+A watch can sync a day's readings long after the day itself, so recent
+wellness is refetched rather than assumed complete.
 """
 
 
@@ -42,7 +42,7 @@ class IntervalsIngester:
         since: dt.date | None = None,
         with_streams: bool = True,
         with_wellness: bool = True,
-        with_rr: bool = True,
+        with_rr: bool = False,
         limit: int | None = None,
     ) -> None:
         """Configure a run.
@@ -54,10 +54,11 @@ class IntervalsIngester:
             with_streams: Whether to fetch per-activity streams.
             with_wellness: Whether to fetch daily wellness.
             with_rr: Whether to download each activity's FIT file for the
-                beat-to-beat intervals the streams API does not expose. This
-                is the largest request the adapter makes, and an activity
-                recorded without a chest strap will not have any, so it is
-                worth turning off for a fast sync.
+                beat-to-beat intervals the streams API does not expose. Off by
+                default: it is the largest request the adapter makes, an
+                activity recorded without a chest strap has none to find, and
+                nothing consumes the data yet. The path is kept working so
+                that per-beat analysis can switch it on later.
             limit: Stop after this many activities.
         """
         self._client = client
@@ -215,8 +216,5 @@ def _has_measurement(day: WellnessDay) -> bool:
         "sleep_hours",
         "spo2",
         "weight_kg",
-        "ctl",
-        "atl",
-        "form",
     )
     return any(getattr(day, field, None) is not None for field in measured)

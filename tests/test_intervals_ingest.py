@@ -93,19 +93,20 @@ def test_stored_rows_carry_the_upstream_load_fields(store: Store) -> None:
     assert row["icu_intensity"] == 88.2
 
 
-def test_wellness_rows_carry_fitness_fields(store: Store) -> None:
+def test_wellness_rows_carry_the_measured_fields(store: Store) -> None:
+    """The measured series are what the store keeps; rolling load is not."""
     IntervalsIngester(_client([])).ingest(store)
 
     row = store.conn.execute(
-        "SELECT ctl, atl, form, hrv_rmssd, spo2 FROM wellness_daily WHERE date = ?",
-        ("2026-06-20",),
+        "SELECT * FROM wellness_daily WHERE date = ?", ("2026-06-20",)
     ).fetchone()
 
-    assert row["ctl"] == 62.4
-    assert row["atl"] == 71.8
-    assert row["form"] == 62.4 - 71.8
     assert row["hrv_rmssd"] == 68.2
+    assert row["resting_hr"] == 47.0
+    assert row["avg_sleeping_hr"] == 51.4
     assert row["spo2"] == 97.0
+    # The payload still carries CTL and ATL; the store does not.
+    assert {"ctl", "atl", "form"}.isdisjoint(set(row.keys()))
 
 
 def test_streams_can_be_skipped(store: Store) -> None:
@@ -152,10 +153,11 @@ def _fake_fit(payload: bytes = b"") -> bytes:
     return b"\x00" * 8 + b".FIT" + payload
 
 
-def test_rr_download_is_skipped_when_disabled(store: Store) -> None:
+def test_rr_download_is_off_by_default(store: Store) -> None:
+    """Nothing reads beat data yet, so a routine sync must not pay for it."""
     calls: list[str] = []
 
-    IntervalsIngester(_client(calls), with_rr=False).ingest(store)
+    IntervalsIngester(_client(calls)).ingest(store)
 
     assert not any("file" in path for path in calls)
 
@@ -165,7 +167,7 @@ def test_rr_download_prefers_the_original_file(store: Store) -> None:
     calls: list[str] = []
     files = {"/file": httpx.Response(200, content=_fake_fit())}
 
-    IntervalsIngester(_client(calls, files=files), limit=1).ingest(store)
+    IntervalsIngester(_client(calls, files=files), with_rr=True, limit=1).ingest(store)
 
     assert any(path.endswith("/file") for path in calls)
     # The generated fallback is not needed once the original arrives.
@@ -180,7 +182,7 @@ def test_rr_download_falls_back_to_the_generated_fit(store: Store) -> None:
         "/fit-file": httpx.Response(200, content=_fake_fit()),
     }
 
-    IntervalsIngester(_client(calls, files=files), limit=1).ingest(store)
+    IntervalsIngester(_client(calls, files=files), with_rr=True, limit=1).ingest(store)
 
     assert any(path.endswith("/fit-file") for path in calls)
 
@@ -201,7 +203,7 @@ def test_missing_activity_file_is_not_an_error(store: Store) -> None:
     """Most activities have no file to serve; a sync must not stop for it."""
     calls: list[str] = []
 
-    summary = IntervalsIngester(_client(calls)).ingest(store)
+    summary = IntervalsIngester(_client(calls), with_rr=True).ingest(store)
 
     assert summary.activities == 3
     assert store.counts()["activities"] == 3
@@ -213,7 +215,9 @@ def test_unparseable_activity_file_is_reported_not_fatal(store: Store) -> None:
     files = {"/file": httpx.Response(200, content=_fake_fit(b"not really a fit body"))}
     lines: list[str] = []
 
-    summary = IntervalsIngester(_client(calls, files=files)).ingest(store, progress=lines.append)
+    summary = IntervalsIngester(_client(calls, files=files), with_rr=True).ingest(
+        store, progress=lines.append
+    )
 
     assert summary.activities == 3
     assert any("could not be parsed" in line for line in lines)
