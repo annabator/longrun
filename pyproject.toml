@@ -16,6 +16,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "fitdecode>=0.11.0",
     "httpx>=0.27",
     "pandas>=2.2",
     "plotly>=5.22",
@@ -99,7 +100,7 @@ warn_unreachable = true
 files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
-module = ["plotly.*"]
+module = ["plotly.*", "fitdecode.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
