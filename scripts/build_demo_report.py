@@ -15,6 +15,7 @@ from pathlib import Path
 
 from longrun.ingest.manual import load_tests_csv, load_wellness_csv
 from longrun.ingest.strava.mapper import activity_from_payload, stream_points_from_payload
+from longrun.models import Source
 from longrun.report import build_report, load_report_data
 from longrun.store import Store
 
@@ -36,7 +37,7 @@ def main() -> None:
         store.upsert_tests(load_tests_csv(SAMPLE_DIR / "tests_sample.csv"))
         store.upsert_activities([activity_from_payload(item) for item in payload["activities"]])
         for strava_id, streams in payload["streams"].items():
-            store.upsert_streams(int(strava_id), stream_points_from_payload(streams))
+            store.upsert_streams(Source.STRAVA, str(strava_id), stream_points_from_payload(streams))
 
         report = build_report(
             load_report_data(store), OUTPUT_DIR / "report.html", title="longrun demo"

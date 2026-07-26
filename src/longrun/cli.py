@@ -19,8 +19,11 @@ import typer
 from longrun import __version__
 from longrun.config import Settings, load_settings
 from longrun.errors import LongrunError
+from longrun.ingest.base import IngestSummary
+from longrun.ingest.fit import FitFolderIngester
+from longrun.ingest.intervals import IntervalsClient, IntervalsIngester
 from longrun.ingest.manual import load_tests_csv, load_wellness_csv
-from longrun.ingest.strava import StravaAuthenticator, StravaClient, TokenStore, ingest_strava
+from longrun.ingest.strava import StravaAuthenticator, StravaClient, StravaIngester, TokenStore
 from longrun.ingest.strava.auth import DEFAULT_SCOPE, build_authorize_url
 from longrun.report import build_report, load_report_data
 from longrun.store import Store
@@ -32,7 +35,8 @@ app = typer.Typer(
     add_completion=False,
 )
 ingest_app = typer.Typer(
-    help="Load activities and health metrics into the store.", no_args_is_help=True
+    help="Load activities and health metrics into the store. Intervals.icu is the default source.",
+    no_args_is_help=True,
 )
 auth_app = typer.Typer(help="Authorise longrun against a data provider.", no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
@@ -93,6 +97,76 @@ def auth_strava(ctx: typer.Context) -> None:
         typer.echo(f"Access token valid until {bundle.expires_at:%Y-%m-%d %H:%M %Z}")
 
 
+@ingest_app.command("intervals")
+def ingest_intervals_command(
+    ctx: typer.Context,
+    since: Annotated[
+        dt.datetime | None,
+        typer.Option(
+            "--since",
+            formats=["%Y-%m-%d"],
+            help="Earliest date to fetch. Defaults to resuming from what is stored.",
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Stop after this many activities."),
+    ] = None,
+    streams: Annotated[
+        bool,
+        typer.Option("--streams/--no-streams", help="Also fetch per-activity streams."),
+    ] = True,
+    wellness: Annotated[
+        bool,
+        typer.Option("--wellness/--no-wellness", help="Also fetch daily wellness."),
+    ] = True,
+) -> None:
+    """Pull activities, streams and daily wellness from Intervals.icu.
+
+    This is the default source. Re-running is safe and incremental.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        athlete_id, api_key = settings.intervals.require_credentials()
+        client = IntervalsClient(athlete_id, api_key)
+        try:
+            ingester = IntervalsIngester(
+                client,
+                since=since.date() if since is not None else None,
+                with_streams=streams,
+                with_wellness=wellness,
+                limit=limit,
+            )
+            summary = ingester.ingest(store, progress=typer.echo)
+        finally:
+            client.close()
+        _echo_summary(summary, store)
+
+
+@ingest_app.command("fit")
+def ingest_fit_command(
+    ctx: typer.Context,
+    folder: Annotated[
+        Path | None,
+        typer.Option("--folder", help="Directory of .fit exports. Defaults to data/raw."),
+    ] = None,
+    reparse: Annotated[
+        bool,
+        typer.Option("--reparse", help="Re-read files whose streams are already stored."),
+    ] = False,
+) -> None:
+    """Parse a folder of FIT files, including beat-to-beat R-R intervals.
+
+    The only source of R-R data, which neither Strava nor the Intervals.icu
+    API exposes.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        ingester = FitFolderIngester(folder or settings.raw, skip_known=not reparse)
+        summary = ingester.ingest(store, progress=typer.echo)
+        _echo_summary(summary, store)
+
+
 @ingest_app.command("strava")
 def ingest_strava_command(
     ctx: typer.Context,
@@ -114,25 +188,22 @@ def ingest_strava_command(
         typer.Option("--streams/--no-streams", help="Also fetch per-activity streams."),
     ] = True,
 ) -> None:
-    """Pull activities and their streams from Strava."""
+    """Pull activities and their streams from Strava.
+
+    Secondary source: Strava now requires a paid subscription for these
+    endpoints. Prefer `longrun ingest intervals`.
+    """
     settings = _settings(ctx)
     with _friendly_errors(), Store.open(settings.database) as store:
         after = since.replace(tzinfo=dt.UTC) if since is not None else None
         authenticator = StravaAuthenticator(settings.strava, TokenStore(settings.tokens))
         client = StravaClient(authenticator)
         try:
-            summary = ingest_strava(
-                store,
-                client,
-                since=after,
-                with_streams=streams,
-                limit=limit,
-                progress=typer.echo,
-            )
+            ingester = StravaIngester(client, since=after, with_streams=streams, limit=limit)
+            summary = ingester.ingest(store, progress=typer.echo)
         finally:
             client.close()
-        typer.echo(f"\nIngested {summary.describe()}")
-        _echo_counts(store)
+        _echo_summary(summary, store)
 
 
 @ingest_app.command("manual")
@@ -200,6 +271,12 @@ def _settings(ctx: typer.Context) -> Settings:
     if isinstance(ctx.obj, Settings):
         return ctx.obj
     return load_settings()
+
+
+def _echo_summary(summary: IngestSummary, store: Store) -> None:
+    """Print what a run wrote, then what the store now holds."""
+    typer.echo(f"\nIngested {summary.describe()}")
+    _echo_counts(store)
 
 
 def _echo_counts(store: Store) -> None:
