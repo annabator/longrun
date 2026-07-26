@@ -35,7 +35,7 @@ class Metric(StrEnum):
 
     VO2MAX = "vo2max"
     PARKRUN_5K = "parkrun_5k"
-    FERRITIN = "ferritin"
+    VITAMIN_D = "vitamin_d"
     BODY_FAT_PCT = "body_fat_pct"
 
 
@@ -115,7 +115,7 @@ class WellnessDay(BaseModel):
 class TestResult(BaseModel):
     """A point-in-time measurement, stored in long format.
 
-    Long format keeps the schema open: VO2max, parkrun 5k times, ferritin,
+    Long format keeps the schema open: VO2max, parkrun 5k times, blood results,
     body composition and any metric added in future are all rows here rather
     than columns, so no migration is needed to start tracking something new.
 

@@ -146,10 +146,13 @@ def _build_tests(rng: random.Random) -> list[dict[str, Any]]:
             )
         day += dt.timedelta(days=7)
 
-    for month, value in ((3, 24), (10, 38), (16, 52)):
+    # Vitamin D swings with the seasons in the UK: a post-winter trough, a
+    # post-summer peak, then a better spring once supplementing. Three readings
+    # in eighteen months is what a real blood panel history looks like.
+    for month, value, note in ((3, 38, "post-winter"), (10, 76, ""), (16, 62, "supplementing")):
         blood_day = _add_months(START, month)
         rows.append(
-            _test_row(blood_day, "ferritin", str(value), "ug/L", source="gp", notes="fasted")
+            _test_row(blood_day, "vitamin_d", str(value), "nmol/L", source="gp", notes=note)
         )
 
     rows.sort(key=lambda row: (row["date"], row["metric"]))

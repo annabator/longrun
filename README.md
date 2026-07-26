@@ -171,7 +171,7 @@ date,resting_hr,hrv,sleep_hours,sleep_score,weight_kg,source,notes
 date,metric,value,unit,source,notes
 2026-01-04,parkrun_5k,22:47,,parkrun,windy
 2026-01-06,vo2max,52.1,ml/kg/min,watch,
-2026-02-11,haemoglobin,13.4,g/dL,gp,fasted
+2026-02-11,vitamin_d,62,nmol/L,gp,
 ```
 
 Two conveniences, both deliberate:

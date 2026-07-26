@@ -13,7 +13,7 @@ date,metric,value,unit,source,notes
 2025-03-01,vo2max,45.9,ml/kg/min,synthetic,
 2025-03-08,parkrun_5k,24:12,,parkrun,
 2025-04-01,body_fat_pct,25.9,%,synthetic,
-2025-04-01,ferritin,24,ug/L,gp,fasted
+2025-04-01,vitamin_d,38,nmol/L,gp,post-winter
 2025-04-01,vo2max,47.1,ml/kg/min,synthetic,
 2025-05-01,body_fat_pct,25.4,%,synthetic,
 2025-05-01,vo2max,47.3,ml/kg/min,synthetic,
@@ -45,8 +45,8 @@ date,metric,value,unit,source,notes
 2025-10-18,parkrun_5k,23:16,,parkrun,
 2025-10-25,parkrun_5k,22:34,,parkrun,
 2025-11-01,body_fat_pct,23.7,%,synthetic,
-2025-11-01,ferritin,38,ug/L,gp,fasted
 2025-11-01,parkrun_5k,22:18,,parkrun,
+2025-11-01,vitamin_d,76,nmol/L,gp,
 2025-11-01,vo2max,49.8,ml/kg/min,synthetic,
 2025-11-08,parkrun_5k,22:29,,parkrun,
 2025-11-15,parkrun_5k,22:33,,parkrun,
@@ -72,7 +72,7 @@ date,metric,value,unit,source,notes
 2026-04-01,vo2max,52.2,ml/kg/min,synthetic,
 2026-04-11,parkrun_5k,22:07,,parkrun,
 2026-05-01,body_fat_pct,23.0,%,synthetic,
-2026-05-01,ferritin,52,ug/L,gp,fasted
+2026-05-01,vitamin_d,62,nmol/L,gp,supplementing
 2026-05-01,vo2max,53.0,ml/kg/min,synthetic,
 2026-05-23,parkrun_5k,21:27,,parkrun,
 2026-05-30,parkrun_5k,21:13,,parkrun,

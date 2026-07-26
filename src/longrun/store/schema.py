@@ -68,7 +68,7 @@ _DDL: tuple[str, ...] = (
     )
     """,
     # Long format: one row per (date, metric, source). Holds VO2max, parkrun
-    # 5k times, ferritin, body composition and anything added in future.
+    # 5k times, blood results, body composition and anything added in future.
     """
     CREATE TABLE IF NOT EXISTS tests (
         id     INTEGER PRIMARY KEY,
