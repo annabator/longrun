@@ -3,7 +3,7 @@
 import datetime as dt
 from pathlib import Path
 
-from longrun.models import Activity, StreamPoint, WellnessDay
+from longrun.models import Activity, Source, StreamPoint, WellnessDay
 
 # Aliased: pytest would otherwise try to collect the model class as a test suite.
 from longrun.models import TestResult as Measurement
@@ -47,8 +47,9 @@ def test_activity_upsert_updates_in_place(store: Store, activity: Activity) -> N
 def test_stream_upsert_is_keyed_on_time_offset(store: Store, activity: Activity) -> None:
     """Re-ingesting streams overwrites samples instead of duplicating them."""
     store.upsert_activities([activity])
-    store.upsert_streams(activity.strava_id, [StreamPoint(t_s=0, hr=120.0), StreamPoint(t_s=1)])
-    store.upsert_streams(activity.strava_id, [StreamPoint(t_s=0, hr=130.0)])
+    key = (activity.source, activity.external_id)
+    store.upsert_streams(*key, [StreamPoint(t_s=0, hr=120.0), StreamPoint(t_s=1)])
+    store.upsert_streams(*key, [StreamPoint(t_s=0, hr=130.0)])
 
     rows = store.conn.execute("SELECT t_s, hr FROM activity_streams ORDER BY t_s").fetchall()
 
@@ -58,7 +59,7 @@ def test_stream_upsert_is_keyed_on_time_offset(store: Store, activity: Activity)
 
 def test_streams_for_unknown_activity_are_dropped(store: Store) -> None:
     """Streams without a parent activity are refused, not orphaned."""
-    written = store.upsert_streams(999_999, [StreamPoint(t_s=0, hr=120.0)])
+    written = store.upsert_streams(Source.STRAVA, "999999", [StreamPoint(t_s=0, hr=120.0)])
 
     assert written == 0
     assert store.counts()["activity_streams"] == 0
@@ -95,15 +96,38 @@ def test_tests_upsert_is_keyed_on_date_metric_and_source(store: Store) -> None:
 
 
 def test_latest_activity_start_drives_incremental_ingest(store: Store, activity: Activity) -> None:
-    """The latest stored start time is what makes the next Strava run incremental."""
+    """The latest stored start time is what makes the next run incremental."""
     assert store.latest_activity_start() is None
 
     later = activity.model_copy(
         update={
-            "strava_id": 4243,
+            "external_id": "4243",
             "start_time": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.UTC),
         }
     )
     store.upsert_activities([activity, later])
 
     assert store.latest_activity_start() == dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.UTC)
+
+
+def test_latest_activity_start_is_scoped_by_source(store: Store, activity: Activity) -> None:
+    """A sparse FIT backfill must not make an Intervals sync skip recent days."""
+    from_fit = activity.model_copy(
+        update={
+            "source": Source.FIT,
+            "external_id": "some-export",
+            "start_time": dt.datetime(2026, 6, 1, 6, 0, tzinfo=dt.UTC),
+        }
+    )
+    store.upsert_activities([activity, from_fit])
+
+    assert store.latest_activity_start(Source.STRAVA) == activity.start_time
+    assert store.latest_activity_start(Source.FIT) == from_fit.start_time
+
+
+def test_the_same_session_from_two_sources_stays_two_rows(store: Store, activity: Activity) -> None:
+    """Identity is (source, external_id), so no provider can overwrite another."""
+    twin = activity.model_copy(update={"source": Source.INTERVALS})
+    store.upsert_activities([activity, twin])
+
+    assert store.counts()["activities"] == 2

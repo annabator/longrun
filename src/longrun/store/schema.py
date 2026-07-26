@@ -14,8 +14,16 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
-"""Bumped whenever a migration becomes necessary; recorded in `schema_meta`."""
+from longrun.store.migrations import apply_migrations, current_version
+
+SCHEMA_VERSION = 2
+"""Bumped whenever a migration becomes necessary; recorded in `schema_meta`.
+
+Version 2 retargeted ingestion from Strava to Intervals.icu: activities are
+keyed on `(source, external_id)` rather than a Strava id, and carry the
+subjective and load fields Intervals.icu computes. See
+:mod:`longrun.store.migrations`.
+"""
 
 _DDL: tuple[str, ...] = (
     """
@@ -24,10 +32,14 @@ _DDL: tuple[str, ...] = (
         value TEXT NOT NULL
     )
     """,
+    # Identity is (source, external_id): no single provider owns the key, so
+    # the same session pulled from Intervals.icu and from a FIT file stays two
+    # rows rather than silently overwriting one another.
     """
     CREATE TABLE IF NOT EXISTS activities (
         id                   INTEGER PRIMARY KEY,
-        strava_id            INTEGER NOT NULL UNIQUE,
+        source               TEXT    NOT NULL DEFAULT 'intervals',
+        external_id          TEXT    NOT NULL,
         start_time           TEXT    NOT NULL,
         sport_type           TEXT    NOT NULL,
         name                 TEXT    NOT NULL,
@@ -39,7 +51,11 @@ _DDL: tuple[str, ...] = (
         avg_speed            REAL,
         total_elevation_gain REAL,
         avg_cadence          REAL,
-        source               TEXT    NOT NULL DEFAULT 'strava'
+        feel                 REAL,
+        rpe                  REAL,
+        icu_load             REAL,
+        icu_intensity        REAL,
+        UNIQUE (source, external_id)
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_activities_start_time ON activities (start_time)",
@@ -52,19 +68,25 @@ _DDL: tuple[str, ...] = (
         distance_m  REAL,
         altitude    REAL,
         cadence     REAL,
+        rr_ms       REAL,
         PRIMARY KEY (activity_id, t_s)
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS wellness_daily (
-        date        TEXT PRIMARY KEY,
-        resting_hr  REAL,
-        hrv         REAL,
-        sleep_hours REAL,
-        sleep_score REAL,
-        weight_kg   REAL,
-        source      TEXT NOT NULL DEFAULT 'manual',
-        notes       TEXT
+        date            TEXT PRIMARY KEY,
+        resting_hr      REAL,
+        avg_sleeping_hr REAL,
+        hrv_rmssd       REAL,
+        sleep_score     REAL,
+        sleep_hours     REAL,
+        spo2            REAL,
+        weight_kg       REAL,
+        ctl             REAL,
+        atl             REAL,
+        form            REAL,
+        source          TEXT NOT NULL DEFAULT 'manual',
+        notes           TEXT
     )
     """,
     # Long format: one row per (date, metric, source). Holds VO2max, parkrun
@@ -106,17 +128,26 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create every table and index if it does not already exist.
+    """Create or migrate the schema, then record the version in force.
 
-    Safe to call repeatedly; running it against an initialised database is a
-    no-op beyond recording the current schema version.
+    Safe to call repeatedly, and safe to call on a database written by an
+    earlier version: tables are created only when absent, and an older
+    database is migrated forward with its rows intact.
 
     Args:
         conn: An open connection.
     """
+    existing = current_version(conn)
     with conn:
         for statement in _DDL:
             conn.execute(statement)
+
+    # Migrations run outside the DDL transaction: the activities rebuild
+    # toggles PRAGMA foreign_keys, which cannot change inside one.
+    if 0 < existing < SCHEMA_VERSION:
+        apply_migrations(conn, SCHEMA_VERSION)
+
+    with conn:
         conn.execute(
             """
             INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)

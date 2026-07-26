@@ -13,7 +13,7 @@ import pytest
 
 from longrun.ingest.manual import load_tests_csv, load_wellness_csv
 from longrun.ingest.strava.mapper import activity_from_payload, stream_points_from_payload
-from longrun.models import Activity
+from longrun.models import Activity, Source
 from longrun.store import Store
 
 SAMPLE_DIR = Path(__file__).resolve().parent.parent / "sample_data"
@@ -39,14 +39,17 @@ def seeded_store(tmp_path: Path) -> Iterator[Store]:
         opened.upsert_tests(load_tests_csv(SAMPLE_DIR / "tests_sample.csv"))
         opened.upsert_activities([activity_from_payload(item) for item in payload["activities"]])
         for strava_id, streams in payload["streams"].items():
-            opened.upsert_streams(int(strava_id), stream_points_from_payload(streams))
+            opened.upsert_streams(
+                Source.STRAVA, str(strava_id), stream_points_from_payload(streams)
+            )
         yield opened
 
 
 @pytest.fixture
 def activity() -> Activity:
     return Activity(
-        strava_id=4242,
+        source=Source.STRAVA,
+        external_id="4242",
         start_time=dt.datetime(2026, 3, 1, 7, 30, tzinfo=dt.UTC),
         sport_type="Run",
         name="Morning run",

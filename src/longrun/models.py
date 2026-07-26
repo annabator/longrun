@@ -20,6 +20,8 @@ class Source(StrEnum):
     change; these constants simply name the ones longrun ships with.
     """
 
+    INTERVALS = "intervals"
+    FIT = "fit"
     STRAVA = "strava"
     MANUAL = "manual"
     SYNTHETIC = "synthetic"
@@ -42,16 +44,27 @@ class Metric(StrEnum):
 class Activity(BaseModel):
     """A single training activity, normalised from a provider payload.
 
+    Identity is `(source, external_id)` rather than any one provider's id, so
+    the same activity pulled from two providers stays two rows and neither
+    provider owns the key.
+
     Attributes:
-        strava_id: Provider-assigned identifier; the natural key for upserts.
+        source: Which adapter produced this row (see :class:`Source`).
+        external_id: The provider's own identifier, as text; Intervals.icu
+            uses strings such as `i12345678`, Strava uses integers.
         distance_m: Total distance in metres.
         avg_speed: Average speed in metres per second.
         total_elevation_gain: Cumulative ascent in metres.
+        feel: Subjective post-activity rating, as recorded upstream.
+        rpe: Rating of perceived exertion, as recorded upstream.
+        icu_load: Training load computed by Intervals.icu for this activity.
+        icu_intensity: Intensity relative to threshold, computed upstream.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    strava_id: int
+    source: str
+    external_id: str
     start_time: dt.datetime
     sport_type: str
     name: str
@@ -63,7 +76,10 @@ class Activity(BaseModel):
     avg_speed: float | None = None
     total_elevation_gain: float | None = None
     avg_cadence: float | None = None
-    source: str = Source.STRAVA
+    feel: float | None = None
+    rpe: float | None = None
+    icu_load: float | None = None
+    icu_intensity: float | None = None
 
     @field_validator("start_time")
     @classmethod
@@ -82,6 +98,10 @@ class StreamPoint(BaseModel):
         velocity: Instantaneous smoothed speed in metres per second.
         distance_m: Cumulative distance in metres at this sample.
         altitude: Elevation in metres.
+        rr_ms: Beat-to-beat interval in milliseconds, where the source
+            records it. FIT files carry these; the Intervals.icu streams API
+            does not expose them, so this is usually populated by the FIT
+            adapter rather than by Intervals ingestion.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -92,22 +112,40 @@ class StreamPoint(BaseModel):
     distance_m: float | None = None
     altitude: float | None = None
     cadence: float | None = None
+    rr_ms: float | None = None
 
 
 class WellnessDay(BaseModel):
     """Daily wellness metrics for a single date.
 
-    One row per calendar day; re-ingesting the same date overwrites it.
+    One row per calendar day; re-ingesting the same date merges into it.
+
+    Attributes:
+        avg_sleeping_hr: Mean heart rate across the sleep period.
+        hrv_rmssd: Heart-rate variability as rMSSD, in milliseconds. rMSSD
+            specifically, because the readiness work in v1.1 takes its
+            logarithm, and SDNN is not interchangeable with it.
+        spo2: Blood oxygen saturation as a percentage.
+        ctl: Chronic training load ("fitness"), computed upstream.
+        atl: Acute training load ("fatigue"), computed upstream.
+        form: `ctl - atl`. Stored rather than derived at read time so that a
+            day keeps the value its own loads implied, even after later
+            activities revise the surrounding series.
     """
 
     model_config = ConfigDict(frozen=True)
 
     date: dt.date
     resting_hr: float | None = None
-    hrv: float | None = None
-    sleep_hours: float | None = None
+    avg_sleeping_hr: float | None = None
+    hrv_rmssd: float | None = None
     sleep_score: float | None = None
+    sleep_hours: float | None = None
+    spo2: float | None = None
     weight_kg: float | None = None
+    ctl: float | None = None
+    atl: float | None = None
+    form: float | None = None
     source: str = Source.MANUAL
     notes: str | None = None
 
