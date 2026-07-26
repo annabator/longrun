@@ -96,7 +96,7 @@ ban-relative-imports = "parents"
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["plotly.*"]
