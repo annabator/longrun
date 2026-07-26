@@ -21,17 +21,18 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2
+  - repo: local
     hooks:
+      # Run through the project environment rather than an isolated one, so
+      # mypy sees the same dependencies as `uv run mypy` and CI do. Mirroring
+      # the dependency list into additional_dependencies drifts silently.
       - id: mypy
-        additional_dependencies:
-          - pydantic
-          - pydantic-settings
-          - pandas-stubs
-          - types-requests
-          - typer
-        args: [--strict]
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        require_serial: true
 
   # Belt and braces: this repo goes public, so block accidental data commits.
   - repo: local
