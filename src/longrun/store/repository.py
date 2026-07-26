@@ -201,9 +201,7 @@ class Store:
         Returns:
             The number of rows written.
         """
-        rows = [
-            (r.date.isoformat(), r.metric, r.value, r.unit, r.source, r.notes) for r in results
-        ]
+        rows = [(r.date.isoformat(), r.metric, r.value, r.unit, r.source, r.notes) for r in results]
         with self.conn:
             self.conn.executemany(_TEST_UPSERT, rows)
         return len(rows)

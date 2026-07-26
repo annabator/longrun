@@ -172,9 +172,7 @@ def resting_hr_trend(wellness: pd.DataFrame) -> pd.DataFrame:
     if daily.empty:
         return daily.assign(rolling=pd.Series(dtype=float))
 
-    rolling = (
-        daily.set_index("date")["resting_hr"].rolling(RESTING_HR_WINDOW, min_periods=3).mean()
-    )
+    rolling = daily.set_index("date")["resting_hr"].rolling(RESTING_HR_WINDOW, min_periods=3).mean()
     return daily.assign(rolling=rolling.to_numpy())
 
 

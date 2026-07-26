@@ -1,7 +1,6 @@
 """The store's contract: an idempotent schema and upserts that never duplicate."""
 
 import datetime as dt
-
 from pathlib import Path
 
 from longrun.models import Activity, StreamPoint, WellnessDay
