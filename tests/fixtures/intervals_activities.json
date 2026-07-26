@@ -1,0 +1,43 @@
+[
+  {
+    "id": "i84213770",
+    "start_date_local": "2026-06-20T07:42:11",
+    "type": "Run",
+    "name": "Threshold 5x1000",
+    "distance": 10240.5,
+    "moving_time": 2914,
+    "elapsed_time": 3020,
+    "average_heartrate": 157.2,
+    "max_heartrate": 181.0,
+    "average_speed": 3.514,
+    "total_elevation_gain": 58.0,
+    "average_cadence": 87.5,
+    "feel": 4,
+    "perceived_exertion": 7,
+    "icu_training_load": 96.4,
+    "icu_intensity": 88.2
+  },
+  {
+    "id": "i84219901",
+    "start_date_local": "2026-06-21T08:05:00Z",
+    "sport_type": "Run",
+    "name": "Sunday long run",
+    "distance": 19870.0,
+    "moving_time": 6402,
+    "elapsed_time": 6610,
+    "average_heartrate": 146.9,
+    "average_speed": 3.104,
+    "total_elevation_gain": 121.0,
+    "icu_training_load": 141.0
+  },
+  {
+    "id": "i84222115",
+    "start_date_local": "2026-06-22T18:30:00",
+    "type": "Tennis",
+    "name": "Club tennis",
+    "distance": 0.0,
+    "moving_time": 4500,
+    "elapsed_time": 5400,
+    "icu_training_load": 44.0
+  }
+]

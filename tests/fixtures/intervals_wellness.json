@@ -1,0 +1,33 @@
+[
+  {
+    "id": "2026-06-20",
+    "restingHR": 47,
+    "avgSleepingHR": 51.4,
+    "hrv": 68.2,
+    "sleepScore": 84,
+    "sleepSecs": 27000,
+    "spO2": 97,
+    "weight": 61.1,
+    "ctl": 62.4,
+    "atl": 71.8
+  },
+  {
+    "id": "2026-06-21",
+    "restingHR": 49,
+    "hrv": 59.7,
+    "sleepSecs": 21600,
+    "ctl": 63.9,
+    "atl": 84.2,
+    "form": -20.3
+  },
+  {
+    "id": "2026-06-22T00:00:00",
+    "resting_hr": 48,
+    "hrv_rmssd": 64.0,
+    "sleep_hours": 7.75,
+    "ctl": 64.1
+  },
+  {
+    "id": "2026-06-23"
+  }
+]

@@ -52,6 +52,42 @@ class StravaSettings(BaseSettings):
         return self.client_id, self.client_secret.get_secret_value()
 
 
+class IntervalsSettings(BaseSettings):
+    """Credentials for the Intervals.icu API.
+
+    Read from the environment (or `.env`) with an `INTERVALS_` prefix. Both
+    values come from <https://intervals.icu/settings>.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="INTERVALS_",
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    athlete_id: str | None = None
+    api_key: SecretStr | None = None
+
+    def require_credentials(self) -> tuple[str, str]:
+        """Return the athlete id and API key, or raise if either is unset.
+
+        Returns:
+            An `(athlete_id, api_key)` pair.
+
+        Raises:
+            ConfigError: If either credential is missing.
+        """
+        if not self.athlete_id or self.api_key is None:
+            msg = (
+                "Intervals.icu credentials are not configured. Copy .env.example to "
+                ".env and set INTERVALS_ATHLETE_ID and INTERVALS_API_KEY, both from "
+                "https://intervals.icu/settings."
+            )
+            raise ConfigError(msg)
+        return self.athlete_id, self.api_key.get_secret_value()
+
+
 class Settings(BaseSettings):
     """Local paths and provider settings for a longrun installation.
 
@@ -71,6 +107,8 @@ class Settings(BaseSettings):
     db_path: Path | None = None
     token_path: Path | None = None
     report_path: Path | None = None
+    raw_dir: Path | None = None
+    intervals: IntervalsSettings = Field(default_factory=IntervalsSettings)
     strava: StravaSettings = Field(default_factory=StravaSettings)
 
     @property
@@ -87,6 +125,11 @@ class Settings(BaseSettings):
     def report(self) -> Path:
         """Default output path for the generated HTML dashboard."""
         return self.report_path or self.data_dir / "report.html"
+
+    @property
+    def raw(self) -> Path:
+        """Folder scanned for `.fit` exports; gitignored with the rest of `data/`."""
+        return self.raw_dir or self.data_dir / "raw"
 
 
 def load_settings() -> Settings:

@@ -1,0 +1,9 @@
+{
+  "time": { "type": "time", "data": [0, 1, 2, 3, 4] },
+  "heartrate": { "type": "heartrate", "data": [118, 131, 144, 150] },
+  "velocity_smooth": { "type": "velocity_smooth", "data": [0.0, 3.2, 3.5, 3.6, 3.55] },
+  "distance": { "type": "distance", "data": [0.0, 3.2, 6.7, 10.3, 13.85] },
+  "altitude": { "type": "altitude", "data": [22.0, 22.1, 22.4, 22.2, 22.0] },
+  "cadence": { "type": "cadence", "data": [null, 84, 86, 87, 86] },
+  "watts": { "unexpected": "shape" }
+}
