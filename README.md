@@ -253,6 +253,43 @@ uv run python scripts/build_demo_report.py      # build the demo dashboard
 This is what the test suite and the screenshot above run on. No real training
 history is in this repository.
 
+## Training plan
+
+An adaptive weekly menu, built from rules rather than a model.
+
+```bash
+uv run longrun goals --emphasis threshold --runs 4 --quality 2
+uv run longrun anchor        # training paces from the best recent 5k
+uv run longrun readiness     # green/amber/red, with the reasoning
+uv run longrun plan          # what is worth doing this week
+uv run longrun plan --today  # just the next thing
+```
+
+**Paces come from published formulas, not copyrighted tables.** VDOT is solved
+from Daniels and Gilbert's oxygen-cost and drop-dead curves, and equivalent
+distances from Riegel's endurance formula. The numbers land on the familiar
+ones because they share the same source relationships — nothing was copied.
+The anchor prefers a recent parkrun and takes the *best* result in a
+four-month window, so one slow morning cannot drop every training pace.
+
+**Readiness** compares this morning's rMSSD against a rolling seven-day
+baseline of its logarithm, with a normal range built from the recent standard
+deviation. A single low reading is noise and is reported as such; it takes
+several signals agreeing — HRV plus an elevated resting heart rate, poor
+sleep, a session that felt wrong — before the verdict moves. Every verdict
+lists what fired.
+
+**The menu is not a schedule.** It is a prioritised list of what is worth
+doing this week. Nothing is assigned to a day, nothing is late, and anything
+undone rolls over — up to a cap, because a fortnight of illness should not
+become a fortnight of debt. Readiness attaches a note to hard sessions; it
+never removes them. Easy runs are never carried forward.
+
+**Adaptation suggests, it does not adjust.** Running quicker than prescribed
+*at a lower heart rate* across several sessions means the anchor looks stale,
+so it suggests a re-test. A VDOT that crept upward on its own would eventually
+prescribe paces nobody can hit, with no explanation of why.
+
 ## Cycle tracking (optional)
 
 Period days can be logged manually and used to place training and wellness
@@ -305,10 +342,10 @@ Type hints throughout, docstrings on public functions, `mypy --strict` clean.
 ## Roadmap
 
 - **v1.0.** Ingestion, storage, trend visualisations.
-- **v1.1 – in progress.** Intervals.icu as the default source, daily wellness
-  and fitness/form panels (done); next, a VDOT anchor from published formulas,
-  a readiness signal from ln(rMSSD), and an adaptive weekly session menu. All
-  deterministic and computed in Python; the `analysis` package holds it.
+- **v1.1.** Intervals.icu as the default source, daily wellness panels,
+  optional cycle tracking, and the plan engine above: VDOT anchor, readiness,
+  per-run fitness measures, block rotation, weekly menu and adaptation. All
+  deterministic and computed in Python, all in `longrun.analysis`.
 - **v1.2 – LLM weekly narrative.** A short written summary of the week, phrasing
   figures already computed by v1.0 and v1.1. It does not see the database, and
   it does not produce numbers or plans.

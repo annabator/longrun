@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     report_path: Path | None = None
     raw_dir: Path | None = None
     cycle_db_path: Path | None = None
+    goals_file: Path | None = None
     intervals: IntervalsSettings = Field(default_factory=IntervalsSettings)
     strava: StravaSettings = Field(default_factory=StravaSettings)
 
@@ -131,6 +132,11 @@ class Settings(BaseSettings):
     def raw(self) -> Path:
         """Folder scanned for `.fit` exports; gitignored with the rest of `data/`."""
         return self.raw_dir or self.data_dir / "raw"
+
+    @property
+    def goals_path(self) -> Path:
+        """Where training goals are kept; configuration rather than a record."""
+        return self.goals_file or self.data_dir / "goals.json"
 
     @property
     def cycle_database(self) -> Path:

@@ -73,13 +73,24 @@ the series descriptively and let the reader look.
 ## Scope
 
 - **v1.0:** ingestion, storage, trend visualisations.
-- **v1.1 (current):** Intervals.icu as the default source, daily wellness and
-  fitness/form panels - done. Still to come: a VDOT anchor from published
-  formulas (Daniels O2-cost and Riegel, never copyrighted tables), a readiness
-  signal from a rolling ln(rMSSD) baseline, per-run fitness analysis, block
-  rotation, and a non-strict weekly session menu with rollover. All
-  deterministic, all in `longrun.analysis`.
+- **v1.1 (current):** Intervals.icu as the default source, daily wellness
+  panels, optional cycle tracking, and the plan engine - VDOT anchor,
+  readiness, per-run fitness measures, block rotation, weekly menu,
+  adaptation. All deterministic, all in `longrun.analysis`.
 - **v1.2:** LLM weekly narrative, narrating v1.0/v1.1 outputs only.
+
+Rules the plan engine must keep:
+
+- **Never reproduce a copyrighted table.** VDOT comes from the Daniels and
+  Gilbert equations and Riegel's formula, solved numerically. If a value is
+  wanted that the formulas do not give, derive it - do not paste a table.
+- **Suggest, never silently adjust.** Adaptation proposes a re-test or an
+  easier week; it does not move the anchor on its own. Paces that drift
+  upward unattended end up unreachable with no explanation.
+- **The menu is a priority list, not a timetable.** Nothing is assigned to a
+  weekday, nothing is overdue, and readiness attaches notes rather than
+  removing sessions.
+- **Cap the backlog.** Rollover past the cap drops the oldest sessions.
 
 Do not build v1.2 features early. The plan engine must stay rule-based: a
 session menu or a readiness verdict is produced by thresholds that can be

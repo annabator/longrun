@@ -24,6 +24,12 @@ from longrun.analysis import (
     ovulation_estimate,
     phase_for,
 )
+from longrun.analysis.anchor import anchor_paces, find_anchor
+from longrun.analysis.goals import Emphasis, load_goals, save_goals
+from longrun.analysis.plan import WeeklyMenu, build_menu, week_start_for
+from longrun.analysis.readiness import Readiness
+from longrun.analysis.readiness import assess as readiness_assess
+from longrun.analysis.service import completed_session_names, daily_readings
 from longrun.config import Settings, load_settings
 from longrun.errors import IngestError, LongrunError
 from longrun.ingest.base import IngestSummary
@@ -33,6 +39,7 @@ from longrun.ingest.manual import load_tests_csv, load_wellness_csv
 from longrun.ingest.strava import StravaAuthenticator, StravaClient, StravaIngester, TokenStore
 from longrun.ingest.strava.auth import DEFAULT_SCOPE, build_authorize_url
 from longrun.report import build_report, load_report_data
+from longrun.report.frames import load_tests
 from longrun.store import Store
 from longrun.store.private import CycleStore
 
@@ -55,6 +62,9 @@ cycle_app = typer.Typer(
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(auth_app, name="auth")
 app.add_typer(cycle_app, name="cycle")
+
+READINESS_LOOKBACK_DAYS = 30
+"""How much history to load when judging readiness for one day."""
 
 
 def _version_callback(value: bool) -> None:
@@ -372,6 +382,151 @@ def cycle_remove_command(
         typer.echo(f"Removed {removed} day(s).")
 
 
+@app.command("goals")
+def goals_command(
+    ctx: typer.Context,
+    emphasis: Annotated[
+        Emphasis | None, typer.Option("--emphasis", help="What this block is for.")
+    ] = None,
+    runs: Annotated[
+        int | None, typer.Option("--runs", min=1, max=14, help="Runs wanted per week.")
+    ] = None,
+    quality: Annotated[
+        int | None, typer.Option("--quality", min=0, max=7, help="Hard sessions per week.")
+    ] = None,
+    long_run: Annotated[
+        bool | None, typer.Option("--long-run/--no-long-run", help="Want a weekly long run.")
+    ] = None,
+    constraints: Annotated[
+        str | None, typer.Option("--constraints", help="Free text, kept alongside the plan.")
+    ] = None,
+) -> None:
+    """Show or update the training goals the plan is built around.
+
+    With no options this prints what is currently set.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors():
+        current = load_goals(settings.goals_path)
+        updates = {
+            key: value
+            for key, value in {
+                "emphasis": emphasis,
+                "runs_per_week": runs,
+                "quality_sessions": quality,
+                "long_run": long_run,
+                "constraints": constraints,
+            }.items()
+            if value is not None
+        }
+        if updates:
+            current = current.model_copy(update=updates)
+            save_goals(current, settings.goals_path)
+            typer.echo(f"Saved to {settings.goals_path}")
+
+        typer.echo(current.describe())
+        if current.constraints:
+            typer.echo(f"constraints: {current.constraints}")
+
+
+@app.command("anchor")
+def anchor_command(ctx: typer.Context) -> None:
+    """Recompute training paces from the best recent 5k.
+
+    Uses published formulas rather than copyrighted tables, and prefers a
+    parkrun since a fixed measured course is what makes results comparable.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        tests = load_tests(store.conn)
+        found = find_anchor(tests, _today())
+        if found is None:
+            typer.secho(
+                "No 5k result logged in the last few months, so there is nothing to "
+                "anchor paces on. Log a parkrun with `longrun ingest manual --tests`.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        typer.echo(found.describe())
+        typer.echo("")
+        for line in anchor_paces(found):
+            typer.echo(f"  {line}")
+        typer.echo("\nEasy pace is a ceiling, not a target; slower is usually better.")
+
+
+@app.command("readiness")
+def readiness_command(
+    ctx: typer.Context,
+    date: Annotated[
+        str | None, typer.Argument(help="Date to judge (YYYY-MM-DD). Defaults to today.")
+    ] = None,
+) -> None:
+    """Judge readiness from the rolling ln(rMSSD) baseline and what surrounds it."""
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        parsed = _parse_dates([date] if date else None)
+        target = parsed[0] if parsed else _today()
+        readings = daily_readings(store, target - dt.timedelta(days=READINESS_LOOKBACK_DAYS))
+        verdict = readiness_assess(readings, target)
+
+        typer.echo(f"{target:%Y-%m-%d}  {verdict.readiness}")
+        for reason in verdict.reasons:
+            typer.echo(f"  - {reason}")
+        if verdict.baseline is not None:
+            typer.echo(
+                f"\nbaseline {verdict.baseline.mean_rmssd:.0f} ms "
+                f"(normal range {verdict.baseline.lower_rmssd:.0f}"
+                f"-{verdict.baseline.upper_rmssd:.0f} ms, "
+                f"{verdict.baseline.samples} readings)"
+            )
+        typer.echo("\nThis is a hint, not an instruction.")
+
+
+@app.command("plan")
+def plan_command(
+    ctx: typer.Context,
+    today_only: Annotated[
+        bool, typer.Option("--today", help="Show just the next thing worth doing.")
+    ] = False,
+) -> None:
+    """Show what is worth doing this week.
+
+    A prioritised menu rather than a schedule: nothing is assigned to a day,
+    nothing is late, and anything not done rolls over up to a cap.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        goals = load_goals(settings.goals_path)
+        today = _today()
+        week_start = week_start_for(today)
+        readings = daily_readings(store, today - dt.timedelta(days=READINESS_LOOKBACK_DAYS))
+        verdict = readiness_assess(readings, today)
+        note = _readiness_note(verdict.readiness)
+
+        menu = build_menu(goals, week_start, _week_index(store, week_start), readiness_note=note)
+        done = completed_session_names(store, week_start)
+
+        if today_only:
+            _echo_next_session(menu, done)
+            return
+
+        typer.echo(f"Week of {week_start:%Y-%m-%d} - {menu.describe()}")
+        typer.echo(f"Readiness today: {verdict.readiness}\n")
+        for planned in menu.sessions:
+            marker = "x" if planned.session.name.lower() in done else " "
+            carried = " (rolled over)" if planned.rolled_over else ""
+            typer.echo(f"  [{marker}] {planned.priority}. {planned.session.name}{carried}")
+            typer.echo(f"        {planned.session.description}")
+            if planned.note:
+                typer.echo(f"        note: {planned.note}")
+        if menu.dropped:
+            names = ", ".join(session.name for session in menu.dropped)
+            typer.echo(f"\nDropped from the backlog (past the cap): {names}")
+        typer.echo("\nOrder is priority, not a timetable. Fit them around your week.")
+
+
 @app.command("report")
 def report_command(
     ctx: typer.Context,
@@ -414,6 +569,47 @@ def report_command(
             "This report contains cycle data. Treat the file as private.",
             fg=typer.colors.YELLOW,
         )
+
+
+def _readiness_note(readiness: Readiness) -> str:
+    """Turn a readiness verdict into guidance for the hardest session."""
+    if readiness is Readiness.RED:
+        return "readiness is red; this one is worth swapping for easy running"
+    if readiness is Readiness.AMBER:
+        return "readiness is amber; start it and judge by feel after the first rep"
+    return ""
+
+
+def _week_index(store: Store, week_start: dt.date) -> int:
+    """Return how many weeks of training precede this one.
+
+    Counted from the first stored activity, so the block rotation follows
+    the athlete's own history rather than a calendar.
+
+    Args:
+        store: An initialised store.
+        week_start: Monday of the week in question.
+
+    Returns:
+        The zero-based week number.
+    """
+    first = store.conn.execute("SELECT MIN(start_time) AS first FROM activities").fetchone()
+    if first is None or first["first"] is None:
+        return 0
+    started = dt.datetime.fromisoformat(str(first["first"])).date()
+    return max(0, (week_start - week_start_for(started)).days // 7)
+
+
+def _echo_next_session(menu: WeeklyMenu, done: list[str]) -> None:
+    """Print the highest-priority session still outstanding."""
+    for planned in menu.sessions:
+        if planned.session.name.lower() in done:
+            continue
+        typer.echo(f"{planned.session.name}: {planned.session.description}")
+        if planned.note:
+            typer.echo(f"note: {planned.note}")
+        return
+    typer.echo("Everything on this week's menu is done. Anything else is a bonus.")
 
 
 def _load_cycles(settings: Settings) -> list[Cycle]:
