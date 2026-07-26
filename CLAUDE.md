@@ -16,11 +16,21 @@ A training tracker for running that has no finish line. Most tools are built
 around a goal race; this one is built for training the owner intends to keep
 doing for decades, and answers "what has actually been happening to me?"
 
-It ingests activities from Strava (pace, heart rate, per-activity streams) and
-stores them alongside measurements that never reach a Strava activity: resting
-heart rate, estimated VO₂max, weight, parkrun 5k times, blood results. Some are
-recorded by a watch but never synced; the rest come from a GP, a set of scales
-or a spreadsheet. Everything lives in a local SQLite file.
+It ingests activities from Intervals.icu (pace, heart rate, per-activity
+streams, plus feel, RPE and the load figures Intervals computes) and stores
+them alongside measurements that never reach an activity file: resting heart
+rate, HRV, sleep, estimated VO₂max, weight, parkrun 5k times, blood results.
+Some are recorded by a watch but never synced; the rest come from a GP, a set
+of scales or a spreadsheet. Everything lives in a local SQLite file.
+
+Intervals.icu is the default source. Strava is kept as a secondary adapter but
+now needs a paid subscription for the endpoints involved. FIT files under
+`data/raw` are the only source of beat-to-beat R-R intervals, which v1.1
+readiness needs.
+
+VO₂max is source-dependent: some watches estimate it, others never do. Never
+assume it is present - if it is missing, it is logged manually like any other
+measurement.
 
 `parkrun_5k` is kept as its own metric rather than a generic 5k because it is a
 fixed, measured course under comparable conditions, which is what makes the
@@ -35,9 +45,12 @@ plans.**
 
 Treat this as a constraint on the architecture rather than a preference. Every
 figure the dashboard renders must trace back to a value computed by ordinary
-code from rows in the store. The reporting layer contains no model calls. When
-the v1.2 narrator lands, it receives a finished set of numbers and phrases them;
-it is not handed the database and asked what it thinks.
+code from rows in the store, or to a deterministic figure ingested from
+upstream (Intervals.icu computes CTL, ATL and per-activity load; those are
+stored as given rather than recomputed, and never estimated). The reporting
+layer contains no model calls. When the v1.2 narrator lands, it receives a
+finished set of numbers and phrases them; it is not handed the database and
+asked what it thinks.
 
 A related rule, already implemented: **do not compute or display correlation
 coefficients, regressions or other inferential statistics** across the health
@@ -47,14 +60,18 @@ the series descriptively and let the reader look.
 
 ## Scope
 
-- **v1.0 (current):** ingestion, storage, trend visualisations. Nothing else.
-- **v1.1:** VDOT plan engine – training paces and week structures derived from
-  parkrun and race efforts. Deterministic. The `longrun.analysis` package is
-  reserved for it and is currently empty by design.
+- **v1.0:** ingestion, storage, trend visualisations.
+- **v1.1 (current):** Intervals.icu as the default source, daily wellness and
+  fitness/form panels - done. Still to come: a VDOT anchor from published
+  formulas (Daniels O2-cost and Riegel, never copyrighted tables), a readiness
+  signal from a rolling ln(rMSSD) baseline, per-run fitness analysis, block
+  rotation, and a non-strict weekly session menu with rollover. All
+  deterministic, all in `longrun.analysis`.
 - **v1.2:** LLM weekly narrative, narrating v1.0/v1.1 outputs only.
 
-Do not build v1.1 or v1.2 features into v1.0. Leaving clean room for them is the
-goal; filling it early is not.
+Do not build v1.2 features early. The plan engine must stay rule-based: a
+session menu or a readiness verdict is produced by thresholds that can be
+tested against fixed inputs, never by a model.
 
 ## Privacy
 
@@ -79,17 +96,29 @@ src/longrun/
   config.py         pydantic-settings; credentials are SecretStr
   models.py         the only shapes crossing module boundaries
   errors.py         LongrunError hierarchy; the CLI prints these plainly
-  store/            SQLite schema + upsert repository
+  store/
+    schema.py       DDL at the current SCHEMA_VERSION
+    migrations.py   versioned, idempotent, row-preserving
+    repository.py   upserts on natural keys
   ingest/
-    strava/         OAuth2, rate-limit-aware client, mappers
+    base.py         the Ingester interface every adapter satisfies
+    intervals/      default source: client, mappers, service
+    fit/            FIT folder adapter; the only source of R-R
+    strava/         secondary; OAuth2 client and mappers
     manual.py       CSV loaders
   report/           frames -> figures -> self-contained HTML
-  analysis/         reserved for v1.1
+  analysis/         reserved for the v1.1 plan engine
 ```
 
 Provider payloads must not travel past a mapper. Ingestion adapters translate
 external representations into `longrun.models`; the store and reporting layers
-never see a Strava field name.
+never see a provider's field name.
+
+Intervals.icu is inconsistent about naming - activity fields are snake_case,
+wellness fields are camelCase, and the docs lag the deployed API. The mapper
+therefore reads every field through a list of candidate keys rather than one
+spelling. When adding a field, add its plausible aliases too: the failure mode
+of guessing wrong is a column that silently fills with nulls.
 
 ## Conventions
 
@@ -102,6 +131,10 @@ never see a Strava field name.
   commits over one large one.
 - Every store write is an upsert on a natural key, so re-ingesting is safe.
   Preserve that property when adding tables.
+- Schema changes go through `store/migrations.py` with `SCHEMA_VERSION` bumped.
+  A migration must preserve existing rows, be safe to re-run, and be tested
+  against a database built from the *previous* version's DDL rather than from
+  the current schema.
 
 Before committing:
 
