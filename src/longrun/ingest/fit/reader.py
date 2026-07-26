@@ -82,6 +82,22 @@ def iter_fit_files(folder: Path) -> Iterator[Path]:
     )
 
 
+def activity_key(start: dt.datetime) -> str:
+    """Return the identity longrun gives a FIT activity.
+
+    Two exports of one run share a session start instant but not a filename,
+    so the start instant is what makes ingestion idempotent across both.
+
+    Args:
+        start: The session start time.
+
+    Returns:
+        A second-resolution UTC timestamp, such as `2026-07-25T08:02:18Z`.
+    """
+    moment = start if start.tzinfo else start.replace(tzinfo=dt.UTC)
+    return moment.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _frame_values(frame: fitdecode.FitDataMessage) -> dict[str, Any]:
     """Collect a FIT message's fields into a plain dictionary."""
     return {field.name: field.value for field in frame.fields}
@@ -118,9 +134,12 @@ def _activity_from_session(session: dict[str, Any], path: Path) -> Activity:
     moving = _as_float(session.get("total_timer_time")) or elapsed
     return Activity(
         source=Source.FIT,
-        # The filename is the stable identity here: FIT files carry no id that
-        # survives a re-export, and re-reading the same file must not duplicate.
-        external_id=path.stem,
+        # Identity is the session start instant, not the filename. Exporting
+        # one run twice produces two differently named files describing the
+        # same session, and keying on the name would store both. The start
+        # time belongs to the run itself, so it deduplicates those exports and
+        # is still stable when the same file is read again.
+        external_id=activity_key(start),
         start_time=start if start.tzinfo else start.replace(tzinfo=dt.UTC),
         sport_type=str(session.get("sport") or "Unknown").title(),
         name=path.stem,

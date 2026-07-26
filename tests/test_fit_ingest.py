@@ -5,13 +5,14 @@ What is tested is the logic this project adds on top: recovering when in time
 each R-R interval occurred, and refusing to let one bad export end a run.
 """
 
+import datetime as dt
 from pathlib import Path
 
 import pytest
 
 from longrun.errors import IngestError
-from longrun.ingest.fit import FitFolderIngester, iter_fit_files
-from longrun.ingest.fit.reader import _rr_by_second, read_fit_file
+from longrun.ingest.fit import FitFolderIngester, activity_key, iter_fit_files
+from longrun.ingest.fit.reader import _activity_from_session, _rr_by_second, read_fit_file
 from longrun.store import Store
 
 
@@ -40,6 +41,58 @@ def test_slow_beats_leave_seconds_without_a_value() -> None:
 
 def test_no_intervals_places_nothing() -> None:
     assert _rr_by_second([]) == {}
+
+
+def test_activity_key_is_the_session_start_instant() -> None:
+    """Identity comes from the run, so two exports of it agree."""
+    start = dt.datetime(2026, 7, 25, 8, 2, 18, tzinfo=dt.UTC)
+
+    assert activity_key(start) == "2026-07-25T08:02:18Z"
+
+
+def test_activity_key_normalises_to_utc() -> None:
+    """The same instant in another zone must not become a second activity."""
+    utc = dt.datetime(2026, 7, 25, 8, 2, 18, tzinfo=dt.UTC)
+    elsewhere = utc.astimezone(dt.timezone(dt.timedelta(hours=5)))
+
+    assert activity_key(elsewhere) == activity_key(utc)
+
+
+def test_naive_start_is_treated_as_utc() -> None:
+    naive = dt.datetime(2026, 7, 25, 8, 2, 18)  # noqa: DTZ001 - the case under test
+
+    assert activity_key(naive) == "2026-07-25T08:02:18Z"
+
+
+def test_two_exports_of_one_run_share_an_identity(tmp_path: Path) -> None:
+    """The real case: one run exported twice under different filenames.
+
+    The files differ slightly - a re-export recomputes elevation and cadence -
+    but they describe one session and must not become two activities.
+    """
+    session = {
+        "start_time": dt.datetime(2026, 7, 25, 8, 2, 18, tzinfo=dt.UTC),
+        "sport": "running",
+        "total_distance": 5468.0,
+        "total_elapsed_time": 1930.76,
+        "total_timer_time": 1931.08,
+        "avg_heart_rate": 184,
+        "total_ascent": 9,
+    }
+    reexport = {**session, "total_ascent": 24, "total_timer_time": 1930.0}
+
+    first = _activity_from_session(session, tmp_path / "i169446382.fit")
+    second = _activity_from_session(reexport, tmp_path / "i169446382_Morning_Run.fit")
+
+    assert first.external_id == second.external_id
+    assert (first.source, first.external_id) == (second.source, second.external_id)
+    # The names still differ, since they come from the filenames.
+    assert first.name != second.name
+
+
+def test_a_session_without_a_start_time_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(IngestError, match="session start time"):
+        _activity_from_session({"sport": "running"}, tmp_path / "x.fit")
 
 
 def test_missing_folder_is_a_clear_error(tmp_path: Path, store: Store) -> None:

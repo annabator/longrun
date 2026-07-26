@@ -30,8 +30,10 @@ class FitFolderIngester:
 
         Args:
             folder: Directory of `.fit` files, searched recursively.
-            skip_known: Skip files whose activity already has streams stored,
-                since parsing is the expensive part here.
+            skip_known: Skip a file whose session is already stored with
+                streams. Two exports of one run collapse to a single activity,
+                so with this on the first file read wins and the second is
+                reported as a duplicate rather than silently overwriting it.
         """
         self._folder = folder
         self._skip_known = skip_known
@@ -65,15 +67,22 @@ class FitFolderIngester:
         failures = 0
 
         for path in iter_fit_files(self._folder):
-            if self._skip_known and path.stem in already_have_streams:
-                summary = summary.merge(IngestSummary(streams_skipped=1))
-                continue
             try:
                 activity, points = read_fit_file(path)
             except IngestError as exc:
                 failures += 1
                 report(f"  skipped {path.name}: {exc}")
                 continue
+
+            # The identity is the session start, which is only known once the
+            # file is parsed, so the check happens here rather than on the
+            # filename. Parsing is cheap next to re-writing every sample, and
+            # this is what makes two exports of one run collapse into one row.
+            if self._skip_known and activity.external_id in already_have_streams:
+                report(f"  {path.name}: already stored as {activity.external_id}")
+                summary = summary.merge(IngestSummary(streams_skipped=1))
+                continue
+            already_have_streams.add(activity.external_id)
 
             store.upsert_activities([activity])
             written = (
