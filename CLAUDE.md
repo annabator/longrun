@@ -12,19 +12,25 @@ Guidance for working in this repository.
 
 ## What this project is
 
-A holistic, race-less running and fitness tracker. Most training tools are built
-around a goal race; this one is built for training that has no finish line, and
-answers "what has actually been happening to me?"
+A training tracker for running that has no finish line. Most tools are built
+around a goal race; this one is built for training the owner intends to keep
+doing for decades, and answers "what has actually been happening to me?"
 
-It ingests activities from Strava (pace, heart rate, per-activity streams),
-stores them alongside manually logged health metrics — weight, VO₂max, resting
-heart rate, parkrun 5k times, blood tests such as ferritin — and produces trend
-visualisations. Everything lives in a local SQLite file.
+It ingests activities from Strava (pace, heart rate, per-activity streams) and
+stores them alongside measurements that never reach a Strava activity: resting
+heart rate, estimated VO₂max, weight, parkrun 5k times, blood results. Some are
+recorded by a watch but never synced; the rest come from a GP, a set of scales
+or a spreadsheet. Everything lives in a local SQLite file.
+
+`parkrun_5k` is kept as its own metric rather than a generic 5k because it is a
+fixed, measured course under comparable conditions, which is what makes the
+series comparable across years. The long format means other distances are just
+more metric names; nothing about the tool is parkrun-only.
 
 ## The design principle
 
 **All analysis is deterministic and computed in Python. Any future LLM layer
-only ever narrates pre-computed outputs — it never invents numbers or training
+only ever narrates pre-computed outputs – it never invents numbers or training
 plans.**
 
 Treat this as a constraint on the architecture rather than a preference. Every
@@ -42,7 +48,7 @@ the series descriptively and let the reader look.
 ## Scope
 
 - **v1.0 (current):** ingestion, storage, trend visualisations. Nothing else.
-- **v1.1:** VDOT plan engine — training paces and week structures derived from
+- **v1.1:** VDOT plan engine – training paces and week structures derived from
   parkrun and race efforts. Deterministic. The `longrun.analysis` package is
   reserved for it and is currently empty by design.
 - **v1.2:** LLM weekly narrative, narrating v1.0/v1.1 outputs only.
