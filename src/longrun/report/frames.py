@@ -222,27 +222,6 @@ def rolling_baseline(series: pd.DataFrame, window: str, min_periods: int = 3) ->
     return series.assign(rolling=rolling.to_numpy())
 
 
-def fitness_series(wellness: pd.DataFrame) -> pd.DataFrame:
-    """Return the CTL, ATL and form series on the days all three exist.
-
-    These are computed upstream by Intervals.icu and stored as given; nothing
-    here recomputes them.
-
-    Args:
-        wellness: The wellness frame.
-
-    Returns:
-        A frame with `date`, `ctl`, `atl` and `form`, empty if never recorded.
-    """
-    columns = ("ctl", "atl", "form")
-    if wellness.empty or not all(column in wellness for column in columns):
-        return pd.DataFrame(columns=["date", *columns])
-    recorded = wellness.loc[wellness["ctl"].notna() | wellness["atl"].notna()]
-    if recorded.empty:
-        return pd.DataFrame(columns=["date", *columns])
-    return recorded[["date", *columns]].reset_index(drop=True)
-
-
 def weekly_volume(activities: pd.DataFrame) -> pd.DataFrame:
     """Aggregate activity distance into weekly totals.
 

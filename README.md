@@ -92,7 +92,7 @@ store or the reports.
 |---|---|
 | `activities` | One row per activity, keyed on `(source, external_id)`; includes `feel`, `rpe`, `icu_load`, `icu_intensity` |
 | `activity_streams` | Per-sample series: HR, velocity, distance, altitude, cadence, `rr_ms` |
-| `wellness_daily` | One row per date: resting HR, sleeping HR, HRV rMSSD, sleep, SpO₂, weight, CTL, ATL, form |
+| `wellness_daily` | One row per date: resting HR, sleeping HR, HRV rMSSD, sleep, SpO₂, weight |
 | `tests` | **Long format** – one row per `(date, metric, source)` |
 
 `tests` being long rather than wide is the load-bearing decision. VO₂max, race
@@ -112,18 +112,24 @@ erase a resting HR that came from a different export.
 | | Intervals.icu | FIT files | Manual CSV |
 |---|---|---|---|
 | Activities + streams | ✅ | ✅ | – |
-| feel / RPE / load | ✅ | – | – |
-| Daily wellness, CTL/ATL/form | ✅ | – | ✅ |
-| Beat-to-beat R-R | ✅ via file download | ✅ | – |
+| feel / RPE / per-activity load | ✅ | – | – |
+| Daily wellness (HRV, RHR, sleep, SpO₂) | ✅ | – | ✅ |
+| Beat-to-beat R-R | ✅ with `--rr` | ✅ | – |
 | Weight, VO₂max, bloods, parkrun | – | – | ✅ |
 
-R-R intervals are not in the Intervals.icu streams API, so `ingest intervals`
-downloads each activity's file and reads the beats out of it. The original
-upload is tried first, since it is what the watch actually wrote; the
-Intervals-generated FIT is the fallback for activities uploaded as GPX or TCX.
-That download is the largest request the adapter makes and only happens once
-per activity, but `--no-rr` skips it for a quick sync. `ingest fit` remains for
-files from anywhere else.
+Deliberately not stored: the rolling CTL, ATL and form figures. They are
+exponentially weighted averages over a load that is itself modelled, and this
+project prefers the measured series — HRV, resting heart rate, sleep — that
+they are derived from. Per-activity `icu_load` is kept, and Intervals.icu
+remains the place to read the rolling versions.
+
+R-R intervals are not in the Intervals.icu streams API, so `--rr` downloads
+each activity's file and reads the beats out of it: the original upload first,
+since it is what the watch actually wrote, falling back to the
+Intervals-generated FIT for activities uploaded as GPX or TCX. It is **off by
+default** — it is the largest request the adapter makes and nothing consumes
+the data yet — but the path is kept working for per-beat analysis later.
+`ingest fit` handles files from anywhere else.
 
 VO₂max is source-dependent: some watches estimate it and pass it through,
 others never produce one. longrun does not assume it exists – if your watch
@@ -174,15 +180,15 @@ from then on.
 ## Usage
 
 ```bash
-# The default: activities, streams, daily wellness and R-R intervals.
-# Incremental and safe to repeat.
+# The default: activities, streams and daily wellness. Incremental and safe
+# to repeat.
 uv run longrun ingest intervals
 
 # A cautious first run
-uv run longrun ingest intervals --limit 10 --no-streams --no-rr
+uv run longrun ingest intervals --limit 10 --no-streams
 
-# Skip the per-activity file download for a quick sync
-uv run longrun ingest intervals --no-rr
+# Also download each activity file for beat-to-beat R-R intervals
+uv run longrun ingest intervals --rr
 
 # Parse FIT exports sitting in data/raw, for files from anywhere else
 uv run longrun ingest fit
@@ -235,9 +241,9 @@ series rather than becoming two. Values and units are stored exactly as given.
 ## Sample data
 
 `sample_data/` holds a fabricated eighteen-month history: daily resting HR,
-HRV, sleep and SpO₂, derived CTL/ATL/form, monthly weight and VO₂max,
-fortnightly parkruns, occasional blood results, and 259 activities. A seeded
-generator produces it, so its provenance is checkable rather than asserted:
+HRV, sleep and SpO₂, monthly weight and VO₂max, fortnightly parkruns,
+occasional blood results, and 259 activities. A seeded generator produces it,
+so its provenance is checkable rather than asserted:
 
 ```bash
 uv run python scripts/generate_sample_data.py   # regenerate (byte-identical)

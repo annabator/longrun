@@ -168,8 +168,28 @@ def _rebuild_activities(conn: sqlite3.Connection) -> None:
         raise sqlite3.IntegrityError(msg)
 
 
+def migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Drop the rolling training-load columns from wellness.
+
+    CTL, ATL and form are exponentially weighted averages of a load figure
+    that is itself modelled. They were ingested from Intervals.icu, which
+    still holds and recomputes them, so nothing irrecoverable goes here: the
+    measured series this project cares about - HRV, resting heart rate, sleep
+    - stay untouched, as does the per-activity `icu_load` those averages were
+    built from.
+
+    Args:
+        conn: An open connection.
+    """
+    existing = columns(conn, "wellness_daily")
+    for column in ("ctl", "atl", "form"):
+        if column in existing:
+            conn.execute(f"ALTER TABLE wellness_daily DROP COLUMN {column}")
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: migrate_v1_to_v2,
+    2: migrate_v2_to_v3,
 }
 """Maps a starting version to the migration that advances it by one."""
 

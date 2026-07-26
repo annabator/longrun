@@ -75,8 +75,8 @@ ON CONFLICT (activity_id, t_s) DO UPDATE SET rr_ms = excluded.rr_ms
 _WELLNESS_UPSERT = """
 INSERT INTO wellness_daily (
     date, resting_hr, avg_sleeping_hr, hrv_rmssd, sleep_score, sleep_hours,
-    spo2, weight_kg, ctl, atl, form, source, notes
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    spo2, weight_kg, source, notes
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (date) DO UPDATE SET
     resting_hr      = COALESCE(excluded.resting_hr,      wellness_daily.resting_hr),
     avg_sleeping_hr = COALESCE(excluded.avg_sleeping_hr, wellness_daily.avg_sleeping_hr),
@@ -85,9 +85,6 @@ ON CONFLICT (date) DO UPDATE SET
     sleep_hours     = COALESCE(excluded.sleep_hours,     wellness_daily.sleep_hours),
     spo2            = COALESCE(excluded.spo2,            wellness_daily.spo2),
     weight_kg       = COALESCE(excluded.weight_kg,       wellness_daily.weight_kg),
-    ctl             = COALESCE(excluded.ctl,             wellness_daily.ctl),
-    atl             = COALESCE(excluded.atl,             wellness_daily.atl),
-    form            = COALESCE(excluded.form,            wellness_daily.form),
     source          = excluded.source,
     notes           = COALESCE(excluded.notes,           wellness_daily.notes)
 """
@@ -239,9 +236,6 @@ class Store:
                 d.sleep_hours,
                 d.spo2,
                 d.weight_kg,
-                d.ctl,
-                d.atl,
-                d.form,
                 d.source,
                 d.notes,
             )

@@ -126,11 +126,11 @@ class WellnessDay(BaseModel):
             specifically, because the readiness work in v1.1 takes its
             logarithm, and SDNN is not interchangeable with it.
         spo2: Blood oxygen saturation as a percentage.
-        ctl: Chronic training load ("fitness"), computed upstream.
-        atl: Acute training load ("fatigue"), computed upstream.
-        form: `ctl - atl`. Stored rather than derived at read time so that a
-            day keeps the value its own loads implied, even after later
-            activities revise the surrounding series.
+
+    Deliberately absent: the rolling CTL, ATL and form figures. They are
+    averages over a modelled load rather than measurements, and the per-
+    activity `icu_load` they are built from is kept on
+    :class:`Activity` instead.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -143,9 +143,6 @@ class WellnessDay(BaseModel):
     sleep_hours: float | None = None
     spo2: float | None = None
     weight_kg: float | None = None
-    ctl: float | None = None
-    atl: float | None = None
-    form: float | None = None
     source: str = Source.MANUAL
     notes: str | None = None
 

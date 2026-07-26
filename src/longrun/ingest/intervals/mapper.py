@@ -48,9 +48,6 @@ _WELLNESS_KEYS: Mapping[str, tuple[str, ...]] = {
     "sleep_hours": ("sleepHours", "sleep_hours", "sleep"),
     "spo2": ("spO2", "spo2", "SpO2"),
     "weight": ("weight", "weight_kg"),
-    "ctl": ("ctl", "fitness"),
-    "atl": ("atl", "fatigue"),
-    "form": ("form", "tsb"),
 }
 
 _STREAM_FIELD_BY_TYPE: Mapping[str, str] = {
@@ -110,8 +107,9 @@ def activity_from_payload(payload: Mapping[str, Any]) -> Activity:
 def wellness_from_payload(payload: Mapping[str, Any]) -> WellnessDay:
     """Build a :class:`WellnessDay` from an Intervals.icu wellness record.
 
-    `form` is computed as `ctl - atl` when the API does not supply it
-    directly, which is how Intervals.icu itself defines it.
+    The rolling CTL, ATL and form figures the endpoint also returns are
+    deliberately ignored: they are averages over a modelled load rather than
+    measurements, and Intervals.icu remains the place to read them.
 
     Args:
         payload: One record from the wellness endpoint.
@@ -132,12 +130,6 @@ def wellness_from_payload(payload: Mapping[str, Any]) -> WellnessDay:
         msg = f"Could not parse the date on an Intervals.icu wellness record: {raw_date!r}"
         raise IngestError(msg) from exc
 
-    ctl = _number(payload, _WELLNESS_KEYS["ctl"])
-    atl = _number(payload, _WELLNESS_KEYS["atl"])
-    form = _number(payload, _WELLNESS_KEYS["form"])
-    if form is None and ctl is not None and atl is not None:
-        form = ctl - atl
-
     return WellnessDay(
         date=day,
         resting_hr=_number(payload, _WELLNESS_KEYS["resting_hr"]),
@@ -147,9 +139,6 @@ def wellness_from_payload(payload: Mapping[str, Any]) -> WellnessDay:
         sleep_hours=_sleep_hours(payload),
         spo2=_number(payload, _WELLNESS_KEYS["spo2"]),
         weight_kg=_number(payload, _WELLNESS_KEYS["weight"]),
-        ctl=ctl,
-        atl=atl,
-        form=form,
         source=Source.INTERVALS,
     )
 

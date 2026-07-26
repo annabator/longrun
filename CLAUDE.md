@@ -26,13 +26,19 @@ of scales or a spreadsheet. Everything lives in a local SQLite file.
 Intervals.icu is the default source. Strava is kept as a secondary adapter but
 now needs a paid subscription for the endpoints involved.
 
-Beat-to-beat R-R intervals are not in the Intervals.icu streams API, so
-ingestion downloads each activity's file and reads them out of it: the
-original upload first, the Intervals-generated FIT as a fallback. `ingest fit`
-still handles files from anywhere else. R-R is currently averaged to one value
-per second to fit `activity_streams`; that is fine for heart-rate recovery
-between reps, but per-beat analysis (artifact or ectopic detection) would need
-its own storage rather than that table.
+Beat-to-beat R-R intervals are not in the Intervals.icu streams API, so `--rr`
+downloads each activity's file and reads them out of it: the original upload
+first, the Intervals-generated FIT as a fallback. It is off by default because
+nothing consumes the data yet; do not switch the default on until something
+does. `ingest fit` still handles files from anywhere else. R-R is currently
+averaged to one value per second to fit `activity_streams`; that is fine for
+heart-rate recovery between reps, but per-beat analysis (artifact or ectopic
+detection) would need its own storage rather than that table.
+
+The rolling CTL, ATL and form figures were removed in schema v3. They are
+averages over a modelled load, and this project prefers the measured series
+they derive from. Per-activity `icu_load` stays on `activities`. Do not
+reintroduce the rolling versions: Intervals.icu already shows them.
 
 VO₂max is source-dependent: some watches estimate it, others never do. Never
 assume it is present - if it is missing, it is logged manually like any other

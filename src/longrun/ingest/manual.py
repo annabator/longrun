@@ -30,9 +30,6 @@ WELLNESS_COLUMNS = (
     "sleep_hours",
     "spo2",
     "weight_kg",
-    "ctl",
-    "atl",
-    "form",
     "source",
     "notes",
 )
@@ -79,9 +76,6 @@ def load_wellness_csv(path: Path) -> list[WellnessDay]:
                 sleep_hours=_parse_optional_number(row.get("sleep_hours"), path, line_no),
                 spo2=_parse_optional_number(row.get("spo2"), path, line_no),
                 weight_kg=_parse_optional_number(row.get("weight_kg"), path, line_no),
-                ctl=_parse_optional_number(row.get("ctl"), path, line_no),
-                atl=_parse_optional_number(row.get("atl"), path, line_no),
-                form=_parse_optional_number(row.get("form"), path, line_no),
                 source=_clean(row.get("source")) or Source.MANUAL,
                 notes=_clean(row.get("notes")) or None,
             )

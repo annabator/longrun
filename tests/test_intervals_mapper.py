@@ -99,15 +99,21 @@ def test_sleep_seconds_become_hours() -> None:
     assert wellness_from_payload(record).sleep_hours == pytest.approx(7.5)
 
 
-def test_form_is_derived_when_absent() -> None:
-    """Intervals.icu defines form as CTL minus ATL; it is not always sent."""
-    first, second, *_ = _load("intervals_wellness.json")
+def test_rolling_load_fields_are_ignored() -> None:
+    """The fixture still carries CTL, ATL and form; the mapper drops them.
 
-    derived = wellness_from_payload(first)
-    supplied = wellness_from_payload(second)
+    They are averages over a modelled load rather than measurements, so
+    Intervals.icu stays the place to read them.
+    """
+    record = _load("intervals_wellness.json")[0]
 
-    assert derived.form == pytest.approx(62.4 - 71.8)
-    assert supplied.form == pytest.approx(-20.3)
+    day = wellness_from_payload(record)
+
+    assert not hasattr(day, "ctl")
+    assert not hasattr(day, "atl")
+    assert not hasattr(day, "form")
+    # The measured fields on the same record still map.
+    assert day.hrv_rmssd == pytest.approx(68.2)
 
 
 def test_snake_case_wellness_fields_are_also_accepted() -> None:
@@ -120,8 +126,6 @@ def test_snake_case_wellness_fields_are_also_accepted() -> None:
     assert day.resting_hr == pytest.approx(48.0)
     assert day.hrv_rmssd == pytest.approx(64.0)
     assert day.sleep_hours == pytest.approx(7.75)
-    # Only CTL was sent, so form cannot be derived and must stay absent.
-    assert day.form is None
 
 
 def test_wellness_without_a_date_is_rejected() -> None:

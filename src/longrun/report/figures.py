@@ -30,7 +30,6 @@ from longrun.report.theme import (
     ROLE_ACCENT,
     ROLE_RAW,
     ROLE_SERIES,
-    ROLE_SERIES_ALT,
 )
 
 _PANEL_HEIGHT_PX = 190
@@ -141,83 +140,6 @@ def build_wellness_figure(data: frames.ReportData) -> go.Figure:
     figure.update_layout(height=_PANEL_HEIGHT_PX * 2 + 40, hovermode="x unified", showlegend=True)
     _place_panel_legend(figure, legend="legend", row=1)
     _place_panel_legend(figure, legend="legend2", row=2)
-    _apply_base_layout(figure)
-    return figure
-
-
-def build_fitness_figure(data: frames.ReportData) -> go.Figure:
-    """Build the fitness and form view.
-
-    CTL and ATL share a panel because they share a unit and a scale, which is
-    what makes their gap readable. Form is that gap, so it gets its own panel
-    with a zero line: the sign is the thing being read, not the magnitude
-    against load.
-
-    Args:
-        data: Loaded report frames.
-
-    Returns:
-        The fitness figure.
-    """
-    fitness = frames.fitness_series(data.wellness)
-
-    figure = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.12,
-        row_heights=[0.62, 0.38],
-        subplot_titles=("Fitness and fatigue (training load)", "Form (fitness minus fatigue)"),
-    )
-
-    if fitness.empty:
-        _annotate_empty(figure, row=1)
-        _annotate_empty(figure, row=2)
-    else:
-        figure.add_scatter(
-            x=fitness["date"],
-            y=fitness["ctl"],
-            name="Fitness (CTL)",
-            mode="lines",
-            line={"color": LIGHT.series, "width": LINE_WIDTH},
-            meta={"role": ROLE_SERIES},
-            hovertemplate="Fitness %{y:.0f}<extra></extra>",
-            row=1,
-            col=1,
-        )
-        figure.add_scatter(
-            x=fitness["date"],
-            y=fitness["atl"],
-            name="Fatigue (ATL)",
-            mode="lines",
-            line={"color": LIGHT.series_alt, "width": LINE_WIDTH},
-            meta={"role": ROLE_SERIES_ALT},
-            hovertemplate="Fatigue %{y:.0f}<extra></extra>",
-            row=1,
-            col=1,
-        )
-        figure.add_scatter(
-            x=fitness["date"],
-            y=fitness["form"],
-            name="Form",
-            mode="lines",
-            line={"color": LIGHT.series, "width": LINE_WIDTH},
-            meta={"role": ROLE_SERIES},
-            showlegend=False,
-            hovertemplate="Form %{y:+.0f}<extra></extra>",
-            row=2,
-            col=1,
-        )
-        figure.add_hline(
-            y=0,
-            line_width=1,
-            line_color=LIGHT.axis,
-            row=2,
-            col=1,
-        )
-
-    figure.update_layout(height=_PANEL_HEIGHT_PX * 2 + 40, hovermode="x unified", showlegend=True)
-    _place_panel_legend(figure, legend="legend", row=1)
     _apply_base_layout(figure)
     return figure
 

@@ -16,12 +16,13 @@ from pathlib import Path
 
 from longrun.store.migrations import apply_migrations, current_version
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 """Bumped whenever a migration becomes necessary; recorded in `schema_meta`.
 
 Version 2 retargeted ingestion from Strava to Intervals.icu: activities are
 keyed on `(source, external_id)` rather than a Strava id, and carry the
-subjective and load fields Intervals.icu computes. See
+subjective and load fields Intervals.icu computes. Version 3 dropped the
+rolling CTL, ATL and form columns in favour of the measured series. See
 :mod:`longrun.store.migrations`.
 """
 
@@ -82,9 +83,6 @@ _DDL: tuple[str, ...] = (
         sleep_hours     REAL,
         spo2            REAL,
         weight_kg       REAL,
-        ctl             REAL,
-        atl             REAL,
-        form            REAL,
         source          TEXT NOT NULL DEFAULT 'manual',
         notes           TEXT
     )

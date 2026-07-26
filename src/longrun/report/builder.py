@@ -44,7 +44,6 @@ def build_report(data: frames.ReportData, output_path: Path, *, title: str = "lo
         summary=_summary_tiles(data),
         trend_div=_figure_div(figures.build_trend_figure(data), "trend"),
         wellness_div=_figure_div(figures.build_wellness_figure(data), "wellness"),
-        fitness_div=_figure_div(figures.build_fitness_figure(data), "fitness"),
         volume_div=_figure_div(figures.build_weekly_volume_figure(data), "volume"),
         activity_table=_activity_table(data),
         generated_at=dt.datetime.now(tz=dt.UTC),
@@ -161,7 +160,6 @@ def _render_document(
     summary: str,
     trend_div: str,
     wellness_div: str,
-    fitness_div: str,
     volume_div: str,
     activity_table: str,
     generated_at: dt.datetime,
@@ -213,15 +211,6 @@ def _render_document(
       little, a run of them below baseline is the signal.
     </p>
     {wellness_div}
-  </section>
-  <section>
-    <h2>Fitness and form</h2>
-    <p class="note">
-      Chronic and acute training load as computed by Intervals.icu, with form
-      as the difference between them. These are ingested rather than
-      recalculated here, so they match what the upstream tool shows.
-    </p>
-    {fitness_div}
   </section>
   <section>
     <h2>Weekly running volume</h2>

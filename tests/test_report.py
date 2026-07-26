@@ -8,9 +8,8 @@ import pytest
 
 from longrun.models import Activity
 from longrun.report import build_report, load_report_data
-from longrun.report.figures import build_fitness_figure, build_wellness_figure
+from longrun.report.figures import build_wellness_figure
 from longrun.report.frames import (
-    fitness_series,
     format_duration,
     mark_personal_bests,
     metric_series,
@@ -118,31 +117,23 @@ def test_empty_store_produces_an_empty_report_dataset(store: Store) -> None:
     assert load_report_data(store).is_empty
 
 
-def test_report_includes_the_wellness_and_fitness_sections(
-    seeded_store: Store, tmp_path: Path
-) -> None:
+def test_report_includes_the_wellness_section(seeded_store: Store, tmp_path: Path) -> None:
     data = load_report_data(seeded_store)
 
     document = build_report(data, tmp_path / "report.html").read_text(encoding="utf-8")
 
     assert "Wellness" in document
-    assert "Fitness and form" in document
     assert "HRV rMSSD" in document
 
 
-def test_fitness_series_is_present_in_the_sample_data(seeded_store: Store) -> None:
+def test_report_no_longer_shows_rolling_training_load(seeded_store: Store, tmp_path: Path) -> None:
+    """CTL, ATL and form were dropped in favour of the measured series."""
     data = load_report_data(seeded_store)
 
-    fitness = fitness_series(data.wellness)
+    document = build_report(data, tmp_path / "report.html").read_text(encoding="utf-8")
 
-    assert not fitness.empty
-    assert {"ctl", "atl", "form"} <= set(fitness.columns)
-    # Form is the gap between the two, not an independent series.
-    assert (fitness["form"] - (fitness["ctl"] - fitness["atl"])).abs().max() < 0.11
-
-
-def test_fitness_series_is_empty_without_wellness(store: Store) -> None:
-    assert fitness_series(load_report_data(store).wellness).empty
+    assert "Fitness and form" not in document
+    assert "Fatigue (ATL)" not in document
 
 
 def test_hrv_baseline_is_a_trailing_mean(seeded_store: Store) -> None:
@@ -162,7 +153,6 @@ def test_figures_build_on_an_empty_store(store: Store) -> None:
     data = load_report_data(store)
 
     assert build_wellness_figure(data) is not None
-    assert build_fitness_figure(data) is not None
 
 
 def test_duration_formatting() -> None:

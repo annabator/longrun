@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from longrun.store import SCHEMA_VERSION, Store
-from longrun.store.migrations import columns, current_version
+from longrun.store.migrations import apply_migrations, columns, current_version
 from longrun.store.schema import connect
 
 _V1_DDL = (
@@ -160,8 +160,46 @@ def test_migration_renames_hrv_and_keeps_its_values(tmp_path: Path) -> None:
         assert row["hrv_rmssd"] == 61.5
         assert row["resting_hr"] == 48.0
         assert row["weight_kg"] == 61.2
-        assert set(row.keys()) >= {"avg_sleeping_hr", "spo2", "ctl", "atl", "form"}
+        assert set(row.keys()) >= {"avg_sleeping_hr", "spo2"}
         assert "hrv" not in set(row.keys())
+
+
+def test_v1_database_is_carried_all_the_way_to_the_current_version(tmp_path: Path) -> None:
+    """A v1 store runs both migrations in order, not just the first."""
+    path = tmp_path / "v1.db"
+    _build_v1_database(path)
+
+    with Store.open(path) as store:
+        wellness = columns(store.conn, "wellness_daily")
+
+        assert current_version(store.conn) == SCHEMA_VERSION
+        # v2 added the load columns, v3 removed them again.
+        assert {"ctl", "atl", "form"}.isdisjoint(wellness)
+        assert "hrv_rmssd" in wellness
+
+
+def test_v3_drops_the_rolling_load_columns_and_keeps_the_rest(tmp_path: Path) -> None:
+    """Dropping CTL and ATL must not disturb the measured series beside them."""
+    path = tmp_path / "v2.db"
+    _build_v1_database(path)
+
+    # Bring the file to v2 only, then confirm what v3 does to it.
+    conn = connect(path)
+    try:
+        apply_migrations(conn, 2)
+        conn.execute("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'")
+        conn.execute("UPDATE wellness_daily SET ctl = 62.4, atl = 71.8, form = -9.4")
+        assert {"ctl", "atl", "form"} <= columns(conn, "wellness_daily")
+    finally:
+        conn.close()
+
+    with Store.open(path) as store:
+        row = store.conn.execute("SELECT * FROM wellness_daily").fetchone()
+
+        assert {"ctl", "atl", "form"}.isdisjoint(set(row.keys()))
+        assert row["hrv_rmssd"] == 61.5
+        assert row["resting_hr"] == 48.0
+        assert row["weight_kg"] == 61.2
 
 
 def test_migration_leaves_tests_untouched(tmp_path: Path) -> None:
