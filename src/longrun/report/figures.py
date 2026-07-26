@@ -30,6 +30,7 @@ from longrun.report.theme import (
     ROLE_ACCENT,
     ROLE_RAW,
     ROLE_SERIES,
+    ROLE_SERIES_ALT,
 )
 
 _PANEL_HEIGHT_PX = 190
@@ -93,6 +94,134 @@ def build_trend_figure(data: frames.ReportData) -> go.Figure:
     return figure
 
 
+def build_wellness_figure(data: frames.ReportData) -> go.Figure:
+    """Build the wellness view: HRV rMSSD above resting heart rate.
+
+    Two panels rather than one, because milliseconds and beats per minute
+    share no scale and a twinned axis would invite reading a relationship
+    off the crossing points.
+
+    Args:
+        data: Loaded report frames.
+
+    Returns:
+        The wellness figure.
+    """
+    hrv = frames.rolling_baseline(
+        frames.wellness_series(data.wellness, "hrv_rmssd"), frames.HRV_BASELINE_WINDOW
+    )
+    resting = frames.resting_hr_trend(data.wellness)
+
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        subplot_titles=("HRV rMSSD (ms)", "Resting heart rate (bpm)"),
+    )
+    _add_daily_with_baseline(
+        figure,
+        hrv,
+        row=1,
+        value_column="value",
+        unit="ms",
+        baseline_label=frames.HRV_BASELINE_LABEL,
+        legend="legend",
+    )
+    _add_daily_with_baseline(
+        figure,
+        resting.rename(columns={"resting_hr": "value"}),
+        row=2,
+        value_column="value",
+        unit="bpm",
+        baseline_label=frames.RESTING_HR_WINDOW_LABEL,
+        legend="legend2",
+    )
+
+    figure.update_layout(height=_PANEL_HEIGHT_PX * 2 + 40, hovermode="x unified", showlegend=True)
+    _place_panel_legend(figure, legend="legend", row=1)
+    _place_panel_legend(figure, legend="legend2", row=2)
+    _apply_base_layout(figure)
+    return figure
+
+
+def build_fitness_figure(data: frames.ReportData) -> go.Figure:
+    """Build the fitness and form view.
+
+    CTL and ATL share a panel because they share a unit and a scale, which is
+    what makes their gap readable. Form is that gap, so it gets its own panel
+    with a zero line: the sign is the thing being read, not the magnitude
+    against load.
+
+    Args:
+        data: Loaded report frames.
+
+    Returns:
+        The fitness figure.
+    """
+    fitness = frames.fitness_series(data.wellness)
+
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        row_heights=[0.62, 0.38],
+        subplot_titles=("Fitness and fatigue (training load)", "Form (fitness minus fatigue)"),
+    )
+
+    if fitness.empty:
+        _annotate_empty(figure, row=1)
+        _annotate_empty(figure, row=2)
+    else:
+        figure.add_scatter(
+            x=fitness["date"],
+            y=fitness["ctl"],
+            name="Fitness (CTL)",
+            mode="lines",
+            line={"color": LIGHT.series, "width": LINE_WIDTH},
+            meta={"role": ROLE_SERIES},
+            hovertemplate="Fitness %{y:.0f}<extra></extra>",
+            row=1,
+            col=1,
+        )
+        figure.add_scatter(
+            x=fitness["date"],
+            y=fitness["atl"],
+            name="Fatigue (ATL)",
+            mode="lines",
+            line={"color": LIGHT.series_alt, "width": LINE_WIDTH},
+            meta={"role": ROLE_SERIES_ALT},
+            hovertemplate="Fatigue %{y:.0f}<extra></extra>",
+            row=1,
+            col=1,
+        )
+        figure.add_scatter(
+            x=fitness["date"],
+            y=fitness["form"],
+            name="Form",
+            mode="lines",
+            line={"color": LIGHT.series, "width": LINE_WIDTH},
+            meta={"role": ROLE_SERIES},
+            showlegend=False,
+            hovertemplate="Form %{y:+.0f}<extra></extra>",
+            row=2,
+            col=1,
+        )
+        figure.add_hline(
+            y=0,
+            line_width=1,
+            line_color=LIGHT.axis,
+            row=2,
+            col=1,
+        )
+
+    figure.update_layout(height=_PANEL_HEIGHT_PX * 2 + 40, hovermode="x unified", showlegend=True)
+    _place_panel_legend(figure, legend="legend", row=1)
+    _apply_base_layout(figure)
+    return figure
+
+
 def build_weekly_volume_figure(data: frames.ReportData) -> go.Figure:
     """Build the weekly running volume bar chart.
 
@@ -150,6 +279,49 @@ def _place_panel_legend(figure: go.Figure, *, legend: str, row: int) -> None:
             }
         }
     )
+
+
+def _add_daily_with_baseline(
+    figure: go.Figure,
+    series: pd.DataFrame,
+    *,
+    row: int,
+    value_column: str,
+    unit: str,
+    baseline_label: str,
+    legend: str,
+) -> None:
+    """Add a noisy daily series behind its rolling baseline."""
+    if series.empty:
+        _annotate_empty(figure, row=row)
+        return
+
+    figure.add_scatter(
+        x=series["date"],
+        y=series[value_column],
+        name="Daily reading",
+        mode="lines",
+        line={"color": LIGHT.raw, "width": 1},
+        opacity=0.55,
+        meta={"role": ROLE_RAW},
+        hovertemplate=f"%{{y:.0f}} {unit}<extra></extra>",
+        legend=legend,
+        row=row,
+        col=1,
+    )
+    if "rolling" in series:
+        figure.add_scatter(
+            x=series["date"],
+            y=series["rolling"],
+            name=baseline_label,
+            mode="lines",
+            line={"color": LIGHT.series, "width": LINE_WIDTH},
+            meta={"role": ROLE_SERIES},
+            hovertemplate=f"%{{y:.1f}} {unit}<extra></extra>",
+            legend=legend,
+            row=row,
+            col=1,
+        )
 
 
 def _weight_series(wellness: pd.DataFrame) -> pd.DataFrame:

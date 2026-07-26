@@ -4,14 +4,19 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from longrun.models import Activity
 from longrun.report import build_report, load_report_data
+from longrun.report.figures import build_fitness_figure, build_wellness_figure
 from longrun.report.frames import (
+    fitness_series,
     format_duration,
     mark_personal_bests,
     metric_series,
+    rolling_baseline,
     weekly_volume,
+    wellness_series,
 )
 from longrun.store import Store
 
@@ -102,11 +107,62 @@ def test_weekly_volume_sums_distance_per_week(seeded_store: Store) -> None:
 
     assert not weekly.empty
     assert weekly["distance_km"].sum() > 0
-    assert weekly["distance_km"].sum() == float(data.activities["distance_m"].sum()) / 1000.0
+    # Weekly buckets must account for every metre, allowing for the float
+    # accumulation order differing between the two sums.
+    assert weekly["distance_km"].sum() == pytest.approx(
+        float(data.activities["distance_m"].sum()) / 1000.0
+    )
 
 
 def test_empty_store_produces_an_empty_report_dataset(store: Store) -> None:
     assert load_report_data(store).is_empty
+
+
+def test_report_includes_the_wellness_and_fitness_sections(
+    seeded_store: Store, tmp_path: Path
+) -> None:
+    data = load_report_data(seeded_store)
+
+    document = build_report(data, tmp_path / "report.html").read_text(encoding="utf-8")
+
+    assert "Wellness" in document
+    assert "Fitness and form" in document
+    assert "HRV rMSSD" in document
+
+
+def test_fitness_series_is_present_in_the_sample_data(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    fitness = fitness_series(data.wellness)
+
+    assert not fitness.empty
+    assert {"ctl", "atl", "form"} <= set(fitness.columns)
+    # Form is the gap between the two, not an independent series.
+    assert (fitness["form"] - (fitness["ctl"] - fitness["atl"])).abs().max() < 0.11
+
+
+def test_fitness_series_is_empty_without_wellness(store: Store) -> None:
+    assert fitness_series(load_report_data(store).wellness).empty
+
+
+def test_hrv_baseline_is_a_trailing_mean(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    hrv = rolling_baseline(wellness_series(data.wellness, "hrv_rmssd"), "7D")
+
+    assert not hrv.empty
+    assert "rolling" in hrv
+    # The first two days cannot have a three-sample baseline yet.
+    assert hrv["rolling"].isna().iloc[0]
+    assert hrv["rolling"].notna().iloc[-1]
+
+
+def test_figures_build_on_an_empty_store(store: Store) -> None:
+    """Every panel must render an explanation rather than crash when bare."""
+    data = load_report_data(store)
+
+    assert build_wellness_figure(data) is not None
+    assert build_fitness_figure(data) is not None
 
 
 def test_duration_formatting() -> None:

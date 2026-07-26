@@ -24,14 +24,23 @@ from longrun.models import Source, TestResult, WellnessDay
 WELLNESS_COLUMNS = (
     "date",
     "resting_hr",
-    "hrv",
-    "sleep_hours",
+    "avg_sleeping_hr",
+    "hrv_rmssd",
     "sleep_score",
+    "sleep_hours",
+    "spo2",
     "weight_kg",
+    "ctl",
+    "atl",
+    "form",
     "source",
     "notes",
 )
-"""Recognised columns for a wellness CSV; only `date` is required."""
+"""Recognised columns for a wellness CSV; only `date` is required.
+
+`hrv` is still accepted as a synonym for `hrv_rmssd`, so spreadsheets written
+against v1.0 keep loading without being edited.
+"""
 
 TEST_COLUMNS = ("date", "metric", "value", "unit", "source", "notes")
 """Recognised columns for a tests CSV; `notes` and `source` are optional."""
@@ -60,10 +69,19 @@ def load_wellness_csv(path: Path) -> list[WellnessDay]:
             WellnessDay(
                 date=_parse_date(row["date"], path, line_no),
                 resting_hr=_parse_optional_number(row.get("resting_hr"), path, line_no),
-                hrv=_parse_optional_number(row.get("hrv"), path, line_no),
-                sleep_hours=_parse_optional_number(row.get("sleep_hours"), path, line_no),
+                avg_sleeping_hr=_parse_optional_number(row.get("avg_sleeping_hr"), path, line_no),
+                # `hrv` is accepted as a synonym so spreadsheets written
+                # against v1.0 keep loading unchanged.
+                hrv_rmssd=_parse_optional_number(
+                    row.get("hrv_rmssd") or row.get("hrv"), path, line_no
+                ),
                 sleep_score=_parse_optional_number(row.get("sleep_score"), path, line_no),
+                sleep_hours=_parse_optional_number(row.get("sleep_hours"), path, line_no),
+                spo2=_parse_optional_number(row.get("spo2"), path, line_no),
                 weight_kg=_parse_optional_number(row.get("weight_kg"), path, line_no),
+                ctl=_parse_optional_number(row.get("ctl"), path, line_no),
+                atl=_parse_optional_number(row.get("atl"), path, line_no),
+                form=_parse_optional_number(row.get("form"), path, line_no),
                 source=_clean(row.get("source")) or Source.MANUAL,
                 notes=_clean(row.get("notes")) or None,
             )

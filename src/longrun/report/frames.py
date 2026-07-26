@@ -26,6 +26,15 @@ RESTING_HR_WINDOW = "28D"
 RESTING_HR_WINDOW_LABEL = "28-day average"
 """How that window is named on screen; the offset string is not user-facing."""
 
+HRV_BASELINE_WINDOW = "7D"
+"""Baseline window for rMSSD.
+
+Seven days is the span the v1.1 readiness work uses, so the dashboard shows
+the same baseline the plan engine will reason about rather than a prettier one.
+"""
+
+HRV_BASELINE_LABEL = "7-day baseline"
+
 _DURATION_UNIT = "s"
 
 
@@ -174,6 +183,64 @@ def resting_hr_trend(wellness: pd.DataFrame) -> pd.DataFrame:
 
     rolling = daily.set_index("date")["resting_hr"].rolling(RESTING_HR_WINDOW, min_periods=3).mean()
     return daily.assign(rolling=rolling.to_numpy())
+
+
+def wellness_series(wellness: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Return the days on which one wellness column was recorded.
+
+    Args:
+        wellness: The wellness frame.
+        column: Column to extract.
+
+    Returns:
+        A frame with `date` and `value`, empty if the column is absent or
+        never populated.
+    """
+    if wellness.empty or column not in wellness:
+        return pd.DataFrame(columns=["date", "value"])
+    recorded = wellness.loc[wellness[column].notna(), ["date", column]]
+    return recorded.rename(columns={column: "value"}).reset_index(drop=True)
+
+
+def rolling_baseline(series: pd.DataFrame, window: str, min_periods: int = 3) -> pd.DataFrame:
+    """Add a trailing rolling mean to a date-indexed series.
+
+    The window is a time span rather than a sample count, so gaps in a daily
+    metric shrink the window instead of silently reaching further back.
+
+    Args:
+        series: Frame with `date` and `value`, oldest first.
+        window: Pandas offset string, such as `28D`.
+        min_periods: Minimum samples before a value is produced.
+
+    Returns:
+        The frame with an added `rolling` column.
+    """
+    if series.empty:
+        return series.assign(rolling=pd.Series(dtype=float))
+    rolling = series.set_index("date")["value"].rolling(window, min_periods=min_periods).mean()
+    return series.assign(rolling=rolling.to_numpy())
+
+
+def fitness_series(wellness: pd.DataFrame) -> pd.DataFrame:
+    """Return the CTL, ATL and form series on the days all three exist.
+
+    These are computed upstream by Intervals.icu and stored as given; nothing
+    here recomputes them.
+
+    Args:
+        wellness: The wellness frame.
+
+    Returns:
+        A frame with `date`, `ctl`, `atl` and `form`, empty if never recorded.
+    """
+    columns = ("ctl", "atl", "form")
+    if wellness.empty or not all(column in wellness for column in columns):
+        return pd.DataFrame(columns=["date", *columns])
+    recorded = wellness.loc[wellness["ctl"].notna() | wellness["atl"].notna()]
+    if recorded.empty:
+        return pd.DataFrame(columns=["date", *columns])
+    return recorded[["date", *columns]].reset_index(drop=True)
 
 
 def weekly_volume(activities: pd.DataFrame) -> pd.DataFrame:

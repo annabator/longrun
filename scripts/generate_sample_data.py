@@ -35,6 +35,12 @@ BODY_FAT_START_PCT, BODY_FAT_END_PCT = 26.5, 22.4
 STREAM_SAMPLE_INTERVAL_S = 5
 ACTIVITIES_WITH_STREAMS = 3
 
+# Time constants for the fitness and fatigue series, matching the convention
+# training trackers use.
+CTL_TIME_CONSTANT_DAYS = 42.0
+ATL_TIME_CONSTANT_DAYS = 7.0
+THRESHOLD_HR = 168.0
+
 
 def main() -> None:
     """Write the three sample files, overwriting any previous version."""
@@ -45,10 +51,25 @@ def main() -> None:
     tests = _build_tests(rng)
     activities = _build_activities(rng)
     streams = _build_streams(rng, activities[-ACTIVITIES_WITH_STREAMS:])
+    _add_fitness_series(wellness, activities)
 
     _write_csv(
         OUTPUT_DIR / "wellness_sample.csv",
-        ("date", "resting_hr", "hrv", "sleep_hours", "sleep_score", "weight_kg", "source", "notes"),
+        (
+            "date",
+            "resting_hr",
+            "avg_sleeping_hr",
+            "hrv_rmssd",
+            "sleep_score",
+            "sleep_hours",
+            "spo2",
+            "weight_kg",
+            "ctl",
+            "atl",
+            "form",
+            "source",
+            "notes",
+        ),
         wellness,
     )
     _write_csv(
@@ -93,9 +114,13 @@ def _build_wellness(rng: random.Random) -> list[dict[str, Any]]:
             {
                 "date": day.isoformat(),
                 "resting_hr": f"{resting_hr:.0f}",
-                "hrv": f"{_drift(day, HRV_START, HRV_END) + rng.gauss(0, 5.0):.0f}",
-                "sleep_hours": f"{rng.uniform(6.1, 8.6):.1f}",
+                # Sleeping heart rate sits a few beats above the morning
+                # resting reading, as it does on a real watch.
+                "avg_sleeping_hr": f"{resting_hr + rng.uniform(2.0, 6.0):.0f}",
+                "hrv_rmssd": f"{_drift(day, HRV_START, HRV_END) + rng.gauss(0, 5.0):.0f}",
                 "sleep_score": f"{rng.uniform(58, 96):.0f}",
+                "sleep_hours": f"{rng.uniform(6.1, 8.6):.1f}",
+                "spo2": f"{rng.uniform(94.0, 99.0):.0f}",
                 "weight_kg": weight,
                 "source": "synthetic",
                 "notes": "",
@@ -103,6 +128,43 @@ def _build_wellness(rng: random.Random) -> list[dict[str, Any]]:
         )
         day += dt.timedelta(days=1)
     return rows
+
+
+def _add_fitness_series(wellness: list[dict[str, Any]], activities: list[dict[str, Any]]) -> None:
+    """Fill CTL, ATL and form on the wellness rows, in place.
+
+    These are derived from the synthetic activities the same way a training
+    tracker derives them: an exponentially weighted mean of daily load over 42
+    days for fitness and 7 days for fatigue, with form the difference. Deriving
+    rather than inventing them keeps the sample internally consistent, so a
+    hard training week shows up as fatigue rising above fitness.
+    """
+    load_by_date: dict[str, float] = {}
+    for activity in activities:
+        day = str(activity["start_date"])[:10]
+        load_by_date[day] = load_by_date.get(day, 0.0) + _session_load(activity)
+
+    ctl = 0.0
+    atl = 0.0
+    for row in wellness:
+        load = load_by_date.get(str(row["date"]), 0.0)
+        ctl += (load - ctl) / CTL_TIME_CONSTANT_DAYS
+        atl += (load - atl) / ATL_TIME_CONSTANT_DAYS
+        row["ctl"] = f"{ctl:.1f}"
+        row["atl"] = f"{atl:.1f}"
+        row["form"] = f"{ctl - atl:.1f}"
+
+
+def _session_load(activity: dict[str, Any]) -> float:
+    """Return a training load for one synthetic session.
+
+    Duration scaled by the square of intensity, which is the usual shape:
+    an hour hard costs far more than an hour easy.
+    """
+    hours = float(activity["moving_time"]) / 3600.0
+    avg_hr = float(activity.get("average_heartrate") or THRESHOLD_HR * 0.85)
+    intensity = avg_hr / THRESHOLD_HR
+    return hours * intensity**2 * 100.0
 
 
 def _build_tests(rng: random.Random) -> list[dict[str, Any]]:

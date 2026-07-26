@@ -38,6 +38,7 @@ class Palette:
     grid: str
     axis: str
     series: str
+    series_alt: str
     accent: str
     raw: str
 
@@ -51,6 +52,7 @@ LIGHT = Palette(
     grid="#e1e0d9",
     axis="#c3c2b7",
     series="#2a78d6",
+    series_alt="#eb6834",
     accent="#0ca30c",
     raw="#898781",
 )
@@ -64,10 +66,12 @@ DARK = Palette(
     grid="#2c2c2a",
     axis="#383835",
     series="#3987e5",
+    series_alt="#d95926",
     accent="#0ca30c",
     raw="#898781",
 )
 
 ROLE_SERIES = "series"
+ROLE_SERIES_ALT = "series_alt"
 ROLE_RAW = "raw"
 ROLE_ACCENT = "accent"
