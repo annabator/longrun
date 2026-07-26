@@ -253,6 +253,35 @@ uv run python scripts/build_demo_report.py      # build the demo dashboard
 This is what the test suite and the screenshot above run on. No real training
 history is in this repository.
 
+## Cycle tracking (optional)
+
+Period days can be logged manually and used to place training and wellness
+readings on the cycle day they fell on.
+
+```bash
+uv run longrun cycle log 2026-01-05 --days 5   # log a period
+uv run longrun cycle today                     # where today sits, and how sure
+uv run longrun cycle list                      # cycles derived from the log
+uv run longrun report --with-cycle             # dashboard including the panel
+```
+
+This is the most sensitive data here, and it is isolated accordingly:
+
+- **Its own database**, `data/private/cycle.db`, created `0700`/`0600`. The
+  main store can be copied or shared without this travelling with it.
+- **Manual entry only.** No adapter writes here, nothing in these modules can
+  reach a network, and there is no export command. A test asserts it.
+- **Never committable.** Gitignored by three separate rules, blocked by a
+  pre-commit hook, and a test fails if any of those rules stops matching.
+- **Opt-in on the dashboard.** Without `--with-cycle` the report contains no
+  trace of it, so an ordinary report stays safe to show someone.
+
+Only the logged days are stored. Cycle day and phase are computed at read time
+and never written down, and every phase is reported as an estimate with the
+reason it should or should not be trusted. Ovulation is inferred by counting
+back from the next period, so a completed cycle can be described far better
+than the one in progress — which the output says, rather than hiding.
+
 ## Privacy
 
 - `data/`, all databases, `.env` and token files are gitignored, and a

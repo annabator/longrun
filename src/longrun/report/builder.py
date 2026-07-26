@@ -44,6 +44,7 @@ def build_report(data: frames.ReportData, output_path: Path, *, title: str = "lo
         summary=_summary_tiles(data),
         trend_div=_figure_div(figures.build_trend_figure(data), "trend"),
         wellness_div=_figure_div(figures.build_wellness_figure(data), "wellness"),
+        cycle_section=_cycle_section(data),
         volume_div=_figure_div(figures.build_weekly_volume_figure(data), "volume"),
         activity_table=_activity_table(data),
         generated_at=dt.datetime.now(tz=dt.UTC),
@@ -103,6 +104,36 @@ def _summary_tiles(data: frames.ReportData) -> str:
     return f'    <section class="tiles">\n{cells}\n    </section>'
 
 
+def _cycle_section(data: frames.ReportData) -> str:
+    """Render the cycle panel, or nothing at all when it was not asked for.
+
+    Returning an empty string when no cycles were supplied is what keeps this
+    data out of a dashboard by default: a report built without asking for it
+    contains no trace, not even an empty heading.
+    """
+    if not data.cycles:
+        return ""
+    figure = _figure_div(figures.build_cycle_figure(data), "cycle")
+    return f"""  <section class="private">
+    <h2>By cycle day <span class="badge">private</span></h2>
+    <p class="note">
+      Readings placed on the cycle day they fell on, every cycle overlaid.
+      Cycle boundaries come from logged period days. The shaded band is the
+      median period and the dashed line the median ovulation estimate &mdash;
+      both inferred rather than observed, both medians across cycles, and both
+      softer than they look. Points only, since readings days apart say
+      nothing about the days between, and no averages or tests of difference
+      are computed over what is a handful of cycles.
+    </p>
+    <p class="note">
+      This section only appears because it was asked for with
+      <code>--with-cycle</code>. The underlying data is stored separately from
+      everything else and is never sent anywhere.
+    </p>
+    {figure}
+  </section>"""
+
+
 def _activity_table(data: frames.ReportData) -> str:
     """Render the most recent activities as an accessible HTML table."""
     if data.activities.empty:
@@ -160,6 +191,7 @@ def _render_document(
     summary: str,
     trend_div: str,
     wellness_div: str,
+    cycle_section: str,
     volume_div: str,
     activity_table: str,
     generated_at: dt.datetime,
@@ -212,6 +244,7 @@ def _render_document(
     </p>
     {wellness_div}
   </section>
+{cycle_section}
   <section>
     <h2>Weekly running volume</h2>
     {volume_div}
@@ -312,6 +345,21 @@ caption {{ text-align: left; color: var(--secondary); font-size: 0.85rem; paddin
 th, td {{ text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--grid); }}
 th {{ color: var(--secondary); font-weight: 600; }}
 .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+.private {{ border-color: var(--muted); }}
+.badge {{
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--muted);
+  border-radius: 999px;
+  color: var(--secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}}
+code {{ font-size: 0.85em; }}
 .empty {{ color: var(--muted); }}
 footer {{ color: var(--muted); font-size: 0.8rem; }}
 @media (max-width: 640px) {{

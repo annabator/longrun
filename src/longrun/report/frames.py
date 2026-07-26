@@ -13,10 +13,12 @@ reader look.
 """
 
 import sqlite3
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 import pandas as pd
 
+from longrun.analysis.cycle import Cycle
 from longrun.models import Metric
 from longrun.store import Store
 
@@ -46,11 +48,15 @@ class ReportData:
         activities: One row per stored activity, oldest first.
         wellness: One row per stored wellness day, oldest first.
         tests: Long-format measurements, oldest first.
+        cycles: Cycles derived from logged period days. Empty unless the
+            report was explicitly asked to include them, so a dashboard is
+            free of this data unless requested.
     """
 
     activities: pd.DataFrame
     wellness: pd.DataFrame
     tests: pd.DataFrame
+    cycles: list[Cycle] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
@@ -58,11 +64,17 @@ class ReportData:
         return self.activities.empty and self.wellness.empty and self.tests.empty
 
 
-def load_report_data(store: Store) -> ReportData:
+def load_report_data(store: Store, cycles: Sequence[Cycle] | None = None) -> ReportData:
     """Load every table the dashboard needs.
+
+    Cycles are passed in rather than read here, because they live in a
+    separate database that this module deliberately does not open. A caller
+    that wants the cycle panel has to go and get them on purpose.
 
     Args:
         store: An initialised store.
+        cycles: Cycles derived from logged period days, if the report is to
+            include them.
 
     Returns:
         Frames for activities, wellness and tests.
@@ -71,6 +83,7 @@ def load_report_data(store: Store) -> ReportData:
         activities=load_activities(store.conn),
         wellness=load_wellness(store.conn),
         tests=load_tests(store.conn),
+        cycles=list(cycles or []),
     )
 
 
@@ -220,6 +233,47 @@ def rolling_baseline(series: pd.DataFrame, window: str, min_periods: int = 3) ->
         return series.assign(rolling=pd.Series(dtype=float))
     rolling = series.set_index("date")["value"].rolling(window, min_periods=min_periods).mean()
     return series.assign(rolling=rolling.to_numpy())
+
+
+def by_cycle_day(
+    frame: pd.DataFrame, date_column: str, value_column: str, cycles: Sequence[Cycle]
+) -> pd.DataFrame:
+    """Place each row of a series on its cycle day.
+
+    Rows outside any known cycle are dropped rather than guessed at.
+
+    Args:
+        frame: Any frame carrying a date column and a value column.
+        date_column: Name of the date column.
+        value_column: Name of the value column.
+        cycles: Cycles derived from logged period days.
+
+    Returns:
+        A frame with `cycle_day`, `cycle_start` and `value`, empty when
+        nothing lines up.
+    """
+    empty = pd.DataFrame(columns=["cycle_day", "cycle_start", "value"])
+    if frame.empty or not cycles or value_column not in frame:
+        return empty
+
+    recorded = frame.loc[frame[value_column].notna(), [date_column, value_column]]
+    if recorded.empty:
+        return empty
+
+    rows: list[dict[str, object]] = []
+    for moment, value in zip(recorded[date_column], recorded[value_column], strict=True):
+        day = pd.Timestamp(moment).date()
+        cycle = next((candidate for candidate in cycles if candidate.contains(day)), None)
+        if cycle is None:
+            continue
+        rows.append(
+            {
+                "cycle_day": (day - cycle.start).days + 1,
+                "cycle_start": cycle.start,
+                "value": float(value),
+            }
+        )
+    return pd.DataFrame(rows, columns=["cycle_day", "cycle_start", "value"]) if rows else empty
 
 
 def weekly_volume(activities: pd.DataFrame) -> pd.DataFrame:

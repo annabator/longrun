@@ -43,5 +43,5 @@ repos:
           Refusing to commit a data/secret file. Real athlete data and
           credentials must never enter git history.
         language: fail
-        files: '(^|/)(\.env$|data/|.*\.(db|sqlite3?)$)'
+        files: '(^|/)(\.env$|data/|private/|.*cycle.*\.db$|.*\.(db|sqlite3?)$)'
         exclude: '^\.env\.example$'

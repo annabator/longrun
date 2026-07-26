@@ -3,6 +3,13 @@
 # public; everything below either is, or may contain, real athlete data.
 # ---------------------------------------------------------------------------
 data/
+
+# Cycle tracking is the most sensitive data here and lives in its own file so
+# that it can never ride along with anything else. Listed explicitly as well
+# as under data/, so that loosening the rule above cannot expose it.
+data/private/
+**/private/
+*cycle*.db
 *.db
 *.db-journal
 *.db-wal

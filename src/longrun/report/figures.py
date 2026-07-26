@@ -13,12 +13,15 @@ Nothing here computes a statistic. Figures are drawn from series prepared in
 :mod:`longrun.report.frames`.
 """
 
+from collections.abc import Sequence
+from statistics import median
 from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from longrun.analysis.cycle import Cycle, median_cycle_length, ovulation_estimate
 from longrun.models import Metric
 from longrun.report import frames
 from longrun.report.theme import (
@@ -142,6 +145,158 @@ def build_wellness_figure(data: frames.ReportData) -> go.Figure:
     _place_panel_legend(figure, legend="legend2", row=2)
     _apply_base_layout(figure)
     return figure
+
+
+def build_cycle_figure(data: frames.ReportData) -> go.Figure:
+    """Overlay wellness and effort metrics on the cycle day they fell on.
+
+    Every cycle is drawn in the same recessive grey, with the most recent one
+    picked out. Colouring each cycle separately would need a dozen hues nobody
+    can tell apart, and would suggest that which cycle a point came from is
+    the interesting thing; the spread at a given cycle day is.
+
+    Markers rather than joined lines, because these readings are days apart
+    and a line between them would draw values that were never measured. The
+    menstrual span is shaded and the median ovulation estimate marked, both
+    softly: those boundaries are estimates, not events.
+
+    Args:
+        data: Loaded report frames, including derived cycles.
+
+    Returns:
+        The cycle figure.
+    """
+    panels = (
+        ("HRV rMSSD (ms)", data.wellness, "date", "hrv_rmssd"),
+        ("Resting heart rate (bpm)", data.wellness, "date", "resting_hr"),
+        ("Session RPE", data.activities, "start_time", "rpe"),
+    )
+    figure = make_subplots(
+        rows=len(panels),
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=tuple(title for title, *_ in panels),
+    )
+
+    median_period = _median_period_days(data.cycles)
+    median_ovulation = _median_ovulation_day(data.cycles)
+    latest_start = data.cycles[-1].start if data.cycles else None
+
+    for row, (_, frame, date_column, value_column) in enumerate(panels, start=1):
+        placed = frames.by_cycle_day(frame, date_column, value_column, data.cycles)
+        if placed.empty:
+            _annotate_empty(figure, row=row)
+            continue
+        # Points first: Plotly drops a shape aimed at a subplot that holds no
+        # traces yet, so shading before plotting silently draws nothing. The
+        # bands still sit behind the points, which is a layer setting rather
+        # than a question of insertion order.
+        _add_cycle_scatter(figure, placed, row=row, latest_start=latest_start)
+        _shade_cycle_phases(figure, row, median_period, median_ovulation)
+
+    figure.update_layout(
+        height=_PANEL_HEIGHT_PX * len(panels) + 60,
+        showlegend=True,
+        hovermode="closest",
+    )
+    figure.update_xaxes(title_text="Cycle day", row=len(panels), col=1)
+    _place_panel_legend(figure, legend="legend", row=1)
+    _apply_base_layout(figure)
+    return figure
+
+
+def _add_cycle_scatter(
+    figure: go.Figure, placed: pd.DataFrame, *, row: int, latest_start: object
+) -> None:
+    """Draw every cycle's points, with the most recent one picked out."""
+    earlier = placed.loc[placed["cycle_start"] != latest_start]
+    latest = placed.loc[placed["cycle_start"] == latest_start]
+
+    if not earlier.empty:
+        figure.add_scatter(
+            x=earlier["cycle_day"],
+            y=earlier["value"],
+            name="Earlier cycles",
+            mode="markers",
+            marker={"size": MARKER_SIZE - 1, "color": LIGHT.raw, "symbol": "circle"},
+            opacity=0.55,
+            meta={"role": ROLE_RAW},
+            showlegend=row == 1,
+            legend="legend",
+            hovertemplate="Day %{x}: %{y:.1f}<extra></extra>",
+            row=row,
+            col=1,
+        )
+    if not latest.empty:
+        figure.add_scatter(
+            x=latest["cycle_day"],
+            y=latest["value"],
+            name="Most recent cycle",
+            mode="markers",
+            marker={"size": MARKER_SIZE, "color": LIGHT.series, "symbol": "circle"},
+            meta={"role": ROLE_SERIES},
+            showlegend=row == 1,
+            legend="legend",
+            hovertemplate="Day %{x}: %{y:.1f}<extra></extra>",
+            row=row,
+            col=1,
+        )
+
+
+def _shade_cycle_phases(
+    figure: go.Figure, row: int, median_period: int | None, median_ovulation: int | None
+) -> None:
+    """Mark the median menstrual span and ovulation estimate.
+
+    Visible enough to read but deliberately recessive, and labelled only on
+    the first panel: these are medians across cycles, so they describe where
+    the boundaries usually fall rather than where they fell in any one cycle.
+    """
+    # Left unlabelled on purpose. In-plot labels collided with the subplot
+    # titles and with each other, and the caption above the figure already
+    # says what the band and the line are - which is the right place for a
+    # caveat this long anyway.
+    if median_period:
+        figure.add_vrect(
+            x0=0.5,
+            x1=median_period + 0.5,
+            fillcolor=LIGHT.axis,
+            opacity=0.28,
+            line_width=0,
+            layer="below",
+            row=row,
+            col=1,
+        )
+    if median_ovulation:
+        figure.add_vline(
+            x=median_ovulation,
+            line_width=1.5,
+            line_dash="dash",
+            line_color=LIGHT.ink_muted,
+            row=row,
+            col=1,
+        )
+
+
+def _median_period_days(cycles: Sequence[Cycle]) -> int | None:
+    """Return the median span of the logged periods, in days."""
+    if not cycles:
+        return None
+    return int(median(cycle.period_days for cycle in cycles))
+
+
+def _median_ovulation_day(cycles: Sequence[Cycle]) -> int | None:
+    """Return the median estimated ovulation day across completed cycles."""
+    median_length = median_cycle_length(cycles)
+    days: list[int] = []
+    for cycle in cycles:
+        if not cycle.is_complete:
+            continue
+        estimate = ovulation_estimate(cycle, median_length)
+        if estimate is not None:
+            days.append((estimate - cycle.start).days + 1)
+    return int(median(days)) if days else None
 
 
 def build_weekly_volume_figure(data: frames.ReportData) -> go.Figure:

@@ -17,8 +17,15 @@ import httpx
 import typer
 
 from longrun import __version__
+from longrun.analysis import (
+    Cycle,
+    cycles_from_days,
+    median_cycle_length,
+    ovulation_estimate,
+    phase_for,
+)
 from longrun.config import Settings, load_settings
-from longrun.errors import LongrunError
+from longrun.errors import IngestError, LongrunError
 from longrun.ingest.base import IngestSummary
 from longrun.ingest.fit import FitFolderIngester
 from longrun.ingest.intervals import IntervalsClient, IntervalsIngester
@@ -27,6 +34,7 @@ from longrun.ingest.strava import StravaAuthenticator, StravaClient, StravaInges
 from longrun.ingest.strava.auth import DEFAULT_SCOPE, build_authorize_url
 from longrun.report import build_report, load_report_data
 from longrun.store import Store
+from longrun.store.private import CycleStore
 
 app = typer.Typer(
     name="longrun",
@@ -39,8 +47,14 @@ ingest_app = typer.Typer(
     no_args_is_help=True,
 )
 auth_app = typer.Typer(help="Authorise longrun against a data provider.", no_args_is_help=True)
+cycle_app = typer.Typer(
+    help="Log period days and see the cycle derived from them. "
+    "Stored separately, owner-only, never committed and never sent anywhere.",
+    no_args_is_help=True,
+)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(auth_app, name="auth")
+app.add_typer(cycle_app, name="cycle")
 
 
 def _version_callback(value: bool) -> None:
@@ -255,6 +269,109 @@ def ingest_manual_command(
         _echo_counts(store)
 
 
+@cycle_app.command("log")
+def cycle_log_command(
+    ctx: typer.Context,
+    dates: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Dates to log as period days (YYYY-MM-DD). Defaults to today.",
+        ),
+    ] = None,
+    days: Annotated[
+        int,
+        typer.Option("--days", min=1, help="Log this many consecutive days from the first date."),
+    ] = 1,
+) -> None:
+    """Record period days.
+
+    Stored in a separate, owner-only database that nothing else reads and no
+    command exports. Logging the same day twice changes nothing.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors():
+        first = _parse_dates(dates) or [_today()]
+        wanted = sorted(
+            {day for start in first for day in _consecutive(start, days if len(first) == 1 else 1)}
+        )
+        with CycleStore.open(settings.cycle_database) as store:
+            added = store.log_days(wanted)
+        typer.echo(f"Logged {added} new day(s); {len(wanted) - added} were already recorded.")
+        typer.echo(f"Stored in {settings.cycle_database} (owner-only, never committed).")
+
+
+@cycle_app.command("list")
+def cycle_list_command(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option("--limit", min=1, help="Show this many recent cycles.")] = 6,
+) -> None:
+    """Show the cycles derived from the logged days.
+
+    Phases are computed here and never stored, and each cycle is reported with
+    how far its estimate can be trusted.
+    """
+    settings = _settings(ctx)
+    with _friendly_errors():
+        with CycleStore.open(settings.cycle_database) as store:
+            logged = store.logged_days()
+        if not logged:
+            typer.echo("No period days logged yet. Use `longrun cycle log`.")
+            return
+
+        cycles = cycles_from_days(logged)
+        median = median_cycle_length(cycles)
+        typer.echo(f"{len(logged)} logged days across {len(cycles)} cycles")
+        typer.echo(f"Median completed cycle: {median} days" if median else "No completed cycle yet")
+        typer.echo("")
+        for cycle in cycles[-limit:]:
+            length = f"{cycle.length_days} days" if cycle.length_days else "in progress"
+            ovulation = ovulation_estimate(cycle, median)
+            estimate = phase_for(cycle.start, cycles)
+            typer.echo(
+                f"  {cycle.start:%Y-%m-%d}  {length:<12} "
+                f"period {cycle.period_days}d  "
+                f"ovulation ~{ovulation:%Y-%m-%d}  [{estimate.confidence}]"
+            )
+        typer.echo("\nPhases are soft estimates; see `longrun cycle today` for the reasoning.")
+
+
+@cycle_app.command("today")
+def cycle_today_command(
+    ctx: typer.Context,
+    date: Annotated[
+        str | None, typer.Argument(help="Date to describe (YYYY-MM-DD). Defaults to today.")
+    ] = None,
+) -> None:
+    """Describe where one date sits in the cycle, and how sure that is."""
+    settings = _settings(ctx)
+    with _friendly_errors():
+        day = _parse_dates([date] if date else None)
+        target = day[0] if day else _today()
+        with CycleStore.open(settings.cycle_database) as store:
+            logged = store.logged_days()
+
+        estimate = phase_for(target, cycles_from_days(logged))
+        typer.echo(f"{target:%Y-%m-%d}")
+        typer.echo(f"  phase      {estimate.phase}")
+        typer.echo(f"  cycle day  {estimate.cycle_day if estimate.cycle_day else '-'}")
+        typer.echo(f"  confidence {estimate.confidence}")
+        typer.echo(f"  because    {estimate.reason}")
+
+
+@cycle_app.command("rm")
+def cycle_remove_command(
+    ctx: typer.Context,
+    dates: Annotated[list[str], typer.Argument(help="Dates to remove (YYYY-MM-DD).")],
+) -> None:
+    """Remove logged period days, for correcting a mistake."""
+    settings = _settings(ctx)
+    with _friendly_errors():
+        wanted = _parse_dates(dates)
+        with CycleStore.open(settings.cycle_database) as store:
+            removed = store.remove_days(wanted)
+        typer.echo(f"Removed {removed} day(s).")
+
+
 @app.command("report")
 def report_command(
     ctx: typer.Context,
@@ -263,12 +380,25 @@ def report_command(
         typer.Option("--output", "-o", dir_okay=False, help="Where to write the HTML dashboard."),
     ] = None,
     title: Annotated[str, typer.Option("--title", help="Page title.")] = "longrun",
+    with_cycle: Annotated[
+        bool,
+        typer.Option(
+            "--with-cycle",
+            help="Include the by-cycle-day panel. Off by default so a report is "
+            "free of this data unless asked for.",
+        ),
+    ] = False,
 ) -> None:
-    """Generate the static HTML trend dashboard."""
+    """Generate the static HTML trend dashboard.
+
+    The cycle panel is opt-in: without `--with-cycle` the page contains no
+    trace of that data, which is what makes a report safe to show someone.
+    """
     settings = _settings(ctx)
     destination = output or settings.report
     with _friendly_errors(), Store.open(settings.database) as store:
-        data = load_report_data(store)
+        cycles = _load_cycles(settings) if with_cycle else []
+        data = load_report_data(store, cycles)
         if data.is_empty:
             typer.secho(
                 "The store is empty, so the report would have nothing to show. "
@@ -279,6 +409,60 @@ def report_command(
             raise typer.Exit(code=1)
         written = build_report(data, destination, title=title)
     typer.echo(f"Wrote {written}")
+    if with_cycle:
+        typer.secho(
+            "This report contains cycle data. Treat the file as private.",
+            fg=typer.colors.YELLOW,
+        )
+
+
+def _load_cycles(settings: Settings) -> list[Cycle]:
+    """Open the separate cycle store and derive its cycles.
+
+    Kept out of the reporting layer on purpose: that module never opens this
+    database, so a report can only contain cycle data by an explicit request
+    made here.
+
+    Args:
+        settings: Resolved settings.
+
+    Returns:
+        The derived cycles, empty if nothing has been logged.
+    """
+    with CycleStore.open(settings.cycle_database) as store:
+        return cycles_from_days(store.logged_days())
+
+
+def _today() -> dt.date:
+    """Return today's date in UTC, matching how everything else is stored."""
+    return dt.datetime.now(tz=dt.UTC).date()
+
+
+def _consecutive(start: dt.date, days: int) -> list[dt.date]:
+    """Return `days` dates running from `start`."""
+    return [start + dt.timedelta(days=offset) for offset in range(days)]
+
+
+def _parse_dates(values: list[str] | None) -> list[dt.date]:
+    """Parse ISO-8601 dates, rejecting anything ambiguous.
+
+    Args:
+        values: Date strings, or None.
+
+    Returns:
+        The parsed dates, in the order given.
+
+    Raises:
+        IngestError: If a value is not an ISO-8601 date.
+    """
+    parsed: list[dt.date] = []
+    for value in values or []:
+        try:
+            parsed.append(dt.date.fromisoformat(value.strip()))
+        except ValueError as exc:
+            msg = f"{value!r} is not an ISO-8601 date (expected YYYY-MM-DD)"
+            raise IngestError(msg) from exc
+    return parsed
 
 
 def _settings(ctx: typer.Context) -> Settings:

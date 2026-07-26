@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     token_path: Path | None = None
     report_path: Path | None = None
     raw_dir: Path | None = None
+    cycle_db_path: Path | None = None
     intervals: IntervalsSettings = Field(default_factory=IntervalsSettings)
     strava: StravaSettings = Field(default_factory=StravaSettings)
 
@@ -130,6 +131,15 @@ class Settings(BaseSettings):
     def raw(self) -> Path:
         """Folder scanned for `.fit` exports; gitignored with the rest of `data/`."""
         return self.raw_dir or self.data_dir / "raw"
+
+    @property
+    def cycle_database(self) -> Path:
+        """Path to the cycle database.
+
+        Kept in its own directory, and its own file, so that the main store
+        can be copied or shared without this travelling with it.
+        """
+        return self.cycle_db_path or self.data_dir / "private" / "cycle.db"
 
 
 def load_settings() -> Settings:

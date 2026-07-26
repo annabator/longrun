@@ -1,15 +1,18 @@
 """The dashboard builds from the synthetic dataset, and its derived series hold."""
 
+import datetime as dt
 import re
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from longrun.analysis.cycle import cycles_from_days
 from longrun.models import Activity
 from longrun.report import build_report, load_report_data
-from longrun.report.figures import build_wellness_figure
+from longrun.report.figures import build_cycle_figure, build_wellness_figure
 from longrun.report.frames import (
+    by_cycle_day,
     format_duration,
     mark_personal_bests,
     metric_series,
@@ -18,6 +21,14 @@ from longrun.report.frames import (
     wellness_series,
 )
 from longrun.store import Store
+
+# An obviously fabricated log, spanning part of the synthetic sample period so
+# that some readings land inside a cycle and plenty land outside one.
+FAKE_CYCLE_LOG = [
+    dt.date(2026, 1, 5) + dt.timedelta(days=cycle * 28 + offset)
+    for cycle in range(6)
+    for offset in range(5)
+]
 
 
 def test_report_builds_from_synthetic_data(seeded_store: Store, tmp_path: Path) -> None:
@@ -153,6 +164,79 @@ def test_figures_build_on_an_empty_store(store: Store) -> None:
     data = load_report_data(store)
 
     assert build_wellness_figure(data) is not None
+
+
+def test_the_cycle_panel_is_absent_unless_asked_for(seeded_store: Store, tmp_path: Path) -> None:
+    """A report built the ordinary way carries no trace of this data."""
+    data = load_report_data(seeded_store)
+
+    document = build_report(data, tmp_path / "report.html").read_text(encoding="utf-8")
+
+    assert "By cycle day" not in document
+    assert "cycle" not in document.lower().split("<script")[0]
+
+
+def test_the_cycle_panel_appears_when_cycles_are_supplied(
+    seeded_store: Store, tmp_path: Path
+) -> None:
+    cycles = cycles_from_days(FAKE_CYCLE_LOG)
+    data = load_report_data(seeded_store, cycles)
+
+    document = build_report(data, tmp_path / "report.html").read_text(encoding="utf-8")
+
+    assert "By cycle day" in document
+    assert "--with-cycle" in document
+
+
+def test_readings_are_placed_on_their_cycle_day(seeded_store: Store) -> None:
+    cycles = cycles_from_days(FAKE_CYCLE_LOG)
+    data = load_report_data(seeded_store, cycles)
+
+    placed = by_cycle_day(data.wellness, "date", "hrv_rmssd", cycles)
+
+    assert not placed.empty
+    assert placed["cycle_day"].min() >= 1
+    # The sample covers more than one cycle, so a given day recurs.
+    assert placed["cycle_day"].value_counts().max() > 1
+
+
+def test_readings_outside_any_cycle_are_dropped_not_guessed(seeded_store: Store) -> None:
+    """A reading with no logged cycle around it has no cycle day."""
+    cycles = cycles_from_days(FAKE_CYCLE_LOG)
+    data = load_report_data(seeded_store, cycles)
+
+    placed = by_cycle_day(data.wellness, "date", "hrv_rmssd", cycles)
+    covered = data.wellness["hrv_rmssd"].notna().sum()
+
+    assert 0 < len(placed) < covered
+
+
+def test_placing_by_cycle_day_without_cycles_is_empty(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    assert by_cycle_day(data.wellness, "date", "hrv_rmssd", []).empty
+
+
+def test_the_cycle_figure_builds_with_nothing_logged(store: Store) -> None:
+    data = load_report_data(store, cycles_from_days([]))
+
+    assert build_cycle_figure(data) is not None
+
+
+def test_the_cycle_panel_actually_draws_its_phase_bands(seeded_store: Store) -> None:
+    """The caption promises a shaded period and an ovulation line; check they exist.
+
+    Plotly silently discards a shape aimed at a subplot that has no traces
+    yet, so this went unnoticed until the page was looked at. Asserting on
+    the shapes keeps a caption from describing something invisible.
+    """
+    data = load_report_data(seeded_store, cycles_from_days(FAKE_CYCLE_LOG))
+
+    figure = build_cycle_figure(data)
+
+    kinds = [shape.type for shape in figure.layout.shapes]
+    assert kinds.count("rect") >= 1
+    assert kinds.count("line") >= 1
 
 
 def test_duration_formatting() -> None:

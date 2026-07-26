@@ -85,6 +85,26 @@ Do not build v1.2 features early. The plan engine must stay rule-based: a
 session menu or a readiness verdict is produced by thresholds that can be
 tested against fixed inputs, never by a model.
 
+## Cycle tracking
+
+The most sensitive data in the project, and the rules around it are not
+negotiable:
+
+- It lives in its own database (`data/private/cycle.db`, `0700`/`0600`), never
+  in `longrun.db`. Do not add a cycle table to the main schema.
+- Manual entry only. Never add an adapter, an API call, an export command, or
+  any import of an HTTP client to `store/private.py` or `analysis/cycle.py`.
+  Tests assert this structurally and will fail if it changes.
+- Only logged period days are stored. Phase and cycle day are derived at read
+  time and must never be written to the database.
+- The reporting layer must not open the cycle store. It receives cycles as an
+  argument, so `report --with-cycle` is a real gate rather than a convention.
+- Phase is always presented as an estimate with a reason. Ovulation is
+  inferred by counting back from the next period, so the cycle in progress is
+  a projection and must be labelled as one.
+- Any fixture for this feature must be obviously fabricated, and no generated
+  report may ever be committed.
+
 ## Privacy
 
 This repository is private today and intended to become public later, so real
