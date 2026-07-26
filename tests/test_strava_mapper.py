@@ -28,7 +28,7 @@ PAYLOAD: dict[str, Any] = {
 def test_activity_fields_are_mapped() -> None:
     activity = activity_from_payload(PAYLOAD)
 
-    assert activity.strava_id == 12345
+    assert activity.external_id == "12345"
     assert activity.start_time == dt.datetime(2026, 5, 2, 7, 15, 9, tzinfo=dt.UTC)
     assert activity.distance_m == pytest.approx(10012.3)
     assert activity.avg_hr == pytest.approx(152.4)

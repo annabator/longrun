@@ -1,101 +1,104 @@
 """Orchestrates a Strava ingestion run.
 
+Strava is a secondary source as of v1.1: its API now requires a paid
+subscription for the endpoints longrun needs, so Intervals.icu is the default.
+The adapter is kept because it still works for anyone who has that
+subscription, and because it costs nothing to keep once it is behind the
+common ingester interface.
+
 Each activity is committed as it is fetched rather than at the end, so a run
 cut short by a rate limit leaves the store consistent and the next run
 resumes from where it stopped.
 """
 
 import datetime as dt
-from collections.abc import Callable
-from dataclasses import dataclass
 
+from longrun.ingest.base import IngestSummary, Progress
 from longrun.ingest.strava.client import StravaClient
 from longrun.ingest.strava.mapper import activity_from_payload, stream_points_from_payload
+from longrun.models import Source
 from longrun.store import Store
 
-ProgressFn = Callable[[str], None]
-"""Receives human-readable progress lines; the CLI passes an echo function."""
 
+class StravaIngester:
+    """Pulls activities and streams from the Strava API."""
 
-@dataclass(frozen=True)
-class IngestSummary:
-    """Counts describing what one ingestion run wrote."""
+    source = Source.STRAVA
 
-    activities: int = 0
-    activities_with_streams: int = 0
-    stream_points: int = 0
-    streams_skipped: int = 0
+    def __init__(
+        self,
+        client: StravaClient,
+        *,
+        since: dt.datetime | None = None,
+        with_streams: bool = True,
+        limit: int | None = None,
+    ) -> None:
+        """Configure a run.
 
-    def describe(self) -> str:
-        """Return a one-line human summary of the run."""
-        return (
-            f"{self.activities} activities, "
-            f"{self.stream_points} stream samples across "
-            f"{self.activities_with_streams} activities "
-            f"({self.streams_skipped} already had streams)"
+        Args:
+            client: Configured Strava client.
+            since: Only ingest activities starting after this time. Defaults
+                to resuming from the latest stored Strava activity.
+            with_streams: Whether to also fetch per-activity streams.
+            limit: Stop after this many activities.
+        """
+        self._client = client
+        self._since = since
+        self._with_streams = with_streams
+        self._limit = limit
+
+    def ingest(self, store: Store, *, progress: Progress | None = None) -> IngestSummary:
+        """Pull activities, and optionally their streams, into the store.
+
+        Args:
+            store: Destination store, already initialised.
+            progress: Optional callback for progress lines.
+
+        Returns:
+            Counts of what was written.
+        """
+        report = progress or (lambda _: None)
+        after = self._since if self._since is not None else store.latest_activity_start(self.source)
+        already_have_streams = (
+            store.stored_stream_activity_ids(self.source) if self._with_streams else set()
         )
 
+        if after is not None:
+            report(f"Fetching activities after {after:%Y-%m-%d %H:%M %Z}")
+        else:
+            report("Fetching the full activity history")
 
-def ingest_strava(
-    store: Store,
-    client: StravaClient,
-    *,
-    since: dt.datetime | None = None,
-    with_streams: bool = True,
-    limit: int | None = None,
-    progress: ProgressFn | None = None,
-) -> IngestSummary:
-    """Pull activities, and optionally their streams, into the store.
+        activities = 0
+        with_stream_data = 0
+        stream_points = 0
+        skipped = 0
 
-    Args:
-        store: Destination store; must already be initialised.
-        client: Configured Strava client.
-        since: Only ingest activities starting after this time. Defaults to
-            the latest activity already stored, making runs incremental.
-        with_streams: Whether to also fetch per-activity streams, which is
-            the expensive part of the API budget.
-        limit: Stop after this many activities; useful for a first trial run.
-        progress: Optional callback for progress lines.
+        for payload in self._client.iter_activities(after=after):
+            activity = activity_from_payload(payload)
+            store.upsert_activities([activity])
+            activities += 1
+            report(f"  {activity.start_time:%Y-%m-%d}  {activity.name}")
 
-    Returns:
-        Counts of what was written.
-    """
-    report = progress or (lambda _: None)
-    after = since if since is not None else store.latest_activity_start()
-    already_have_streams = store.stored_stream_activity_ids() if with_streams else set()
+            if self._with_streams:
+                if activity.external_id in already_have_streams:
+                    skipped += 1
+                else:
+                    points = stream_points_from_payload(
+                        self._client.fetch_streams(int(activity.external_id))
+                    )
+                    if points:
+                        stream_points += store.upsert_streams(
+                            self.source, activity.external_id, points
+                        )
+                        with_stream_data += 1
 
-    if after is not None:
-        report(f"Fetching activities after {after:%Y-%m-%d %H:%M %Z}")
-    else:
-        report("Fetching the full activity history")
+            if self._limit is not None and activities >= self._limit:
+                report(f"Reached the requested limit of {self._limit} activities")
+                break
 
-    activities = 0
-    with_stream_data = 0
-    stream_points = 0
-    skipped = 0
-
-    for payload in client.iter_activities(after=after):
-        activity = activity_from_payload(payload)
-        store.upsert_activities([activity])
-        activities += 1
-        report(f"  {activity.start_time:%Y-%m-%d}  {activity.name}")
-
-        if with_streams:
-            if activity.strava_id in already_have_streams:
-                skipped += 1
-            else:
-                points = stream_points_from_payload(client.fetch_streams(activity.strava_id))
-                if points:
-                    stream_points += store.upsert_streams(activity.strava_id, points)
-                    with_stream_data += 1
-
-        if limit is not None and activities >= limit:
-            report(f"Reached the requested limit of {limit} activities")
-            break
-
-    return IngestSummary(
-        activities=activities,
-        activities_with_streams=with_stream_data,
-        stream_points=stream_points,
-        streams_skipped=skipped,
-    )
+        return IngestSummary(
+            activities=activities,
+            activities_with_streams=with_stream_data,
+            stream_points=stream_points,
+            streams_skipped=skipped,
+        )

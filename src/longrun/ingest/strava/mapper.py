@@ -37,7 +37,8 @@ def activity_from_payload(payload: Mapping[str, Any]) -> Activity:
     """
     try:
         return Activity(
-            strava_id=int(payload["id"]),
+            source=Source.STRAVA,
+            external_id=str(payload["id"]),
             start_time=_parse_timestamp(payload["start_date"]),
             # `sport_type` is the modern field; `type` is its legacy spelling.
             sport_type=str(payload.get("sport_type") or payload.get("type") or "Unknown"),
@@ -50,7 +51,6 @@ def activity_from_payload(payload: Mapping[str, Any]) -> Activity:
             avg_speed=_optional_float(payload.get("average_speed")),
             total_elevation_gain=_optional_float(payload.get("total_elevation_gain")),
             avg_cadence=_optional_float(payload.get("average_cadence")),
-            source=Source.STRAVA,
         )
     except (KeyError, TypeError, ValueError) as exc:
         activity_id = payload.get("id", "<unknown>")
