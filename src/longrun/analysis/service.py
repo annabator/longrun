@@ -10,7 +10,10 @@ from typing import Any
 
 import pandas as pd
 
+from longrun.analysis.anchor import ANCHOR_WINDOW_DAYS, DetectedEffort, hard_effort_threshold
 from longrun.analysis.readiness import DailyReading
+from longrun.analysis.splits import best_split
+from longrun.models import is_running_sport
 from longrun.store import Store
 
 
@@ -59,6 +62,68 @@ def daily_readings(store: Store, since: dt.date) -> list[DailyReading]:
             )
         )
     return readings
+
+
+def detect_five_k_efforts(
+    store: Store, today: dt.date, window_days: int = ANCHOR_WINDOW_DAYS
+) -> list[DetectedEffort]:
+    """Scan recent runs for the fastest 5k inside each.
+
+    This is how a parkrun is found without knowing it was one. The watch
+    names everything the same, so the trace is what identifies the effort:
+    the quickest continuous 5000 m in the activity, which excludes a jog to
+    the start line and any cool-down afterwards.
+
+    Args:
+        store: An initialised store.
+        today: The date the window is measured back from.
+        window_days: How far back an activity may be.
+
+    Returns:
+        One effort per run that yielded a split, oldest first. Whether an
+        effort was hard enough to anchor on is decided by
+        :attr:`~longrun.analysis.anchor.DetectedEffort.is_hard`.
+    """
+    earliest = today - dt.timedelta(days=window_days)
+    runs = pd.read_sql_query(
+        "SELECT id, start_time, name, sport_type, max_hr FROM activities "
+        "WHERE start_time >= ? ORDER BY start_time",
+        store.conn,
+        params=(earliest.isoformat(),),
+    )
+    if runs.empty:
+        return []
+    runs = runs.loc[runs["sport_type"].astype(str).map(is_running_sport)]
+    if runs.empty:
+        return []
+
+    threshold = hard_effort_threshold(runs)
+    identifiers = runs["id"].astype(int).tolist()
+    starts = runs["start_time"].astype(str).tolist()
+    names = runs["name"].astype(str).tolist()
+
+    efforts: list[DetectedEffort] = []
+    for activity_id, start, name in zip(identifiers, starts, names, strict=True):
+        streams = pd.read_sql_query(
+            "SELECT t_s, distance_m, hr FROM activity_streams WHERE activity_id = ? ORDER BY t_s",
+            store.conn,
+            params=(activity_id,),
+        )
+        split = best_split(streams)
+        if split is None:
+            continue
+        started = pd.Timestamp(start).to_pydatetime()
+        efforts.append(
+            DetectedEffort(
+                date=started.date(),
+                duration_s=split.duration_s,
+                avg_hr=split.avg_hr,
+                hard_threshold=threshold,
+                weekday=started.weekday(),
+                activity_name=name,
+            )
+        )
+    return efforts
 
 
 def completed_session_names(store: Store, week_start: dt.date) -> list[str]:

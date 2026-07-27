@@ -8,7 +8,7 @@ as a plain message rather than a traceback.
 """
 
 import datetime as dt
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
@@ -24,12 +24,16 @@ from longrun.analysis import (
     ovulation_estimate,
     phase_for,
 )
-from longrun.analysis.anchor import anchor_paces, find_anchor
+from longrun.analysis.anchor import Confidence, DetectedEffort, anchor_paces, find_anchor
 from longrun.analysis.goals import Emphasis, load_goals, save_goals
 from longrun.analysis.plan import WeeklyMenu, build_menu, week_start_for
 from longrun.analysis.readiness import Readiness
 from longrun.analysis.readiness import assess as readiness_assess
-from longrun.analysis.service import completed_session_names, daily_readings
+from longrun.analysis.service import (
+    completed_session_names,
+    daily_readings,
+    detect_five_k_efforts,
+)
 from longrun.config import Settings, load_settings
 from longrun.errors import IngestError, LongrunError
 from longrun.ingest.base import IngestSummary
@@ -430,20 +434,35 @@ def goals_command(
 
 
 @app.command("anchor")
-def anchor_command(ctx: typer.Context) -> None:
+def anchor_command(
+    ctx: typer.Context,
+    candidates: Annotated[
+        bool,
+        typer.Option("--candidates", help="List the 5k efforts found in recent runs."),
+    ] = False,
+) -> None:
     """Recompute training paces from the best recent 5k.
 
-    Uses published formulas rather than copyrighted tables, and prefers a
-    parkrun since a fixed measured course is what makes results comparable.
+    Uses published formulas rather than copyrighted tables. A logged parkrun
+    always wins; failing that, the fastest hard 5k found inside a recent run
+    is used, since a watch names everything the same and the trace is what
+    identifies the effort.
     """
     settings = _settings(ctx)
     with _friendly_errors(), Store.open(settings.database) as store:
-        tests = load_tests(store.conn)
-        found = find_anchor(tests, _today())
+        today = _today()
+        detected = detect_five_k_efforts(store, today)
+
+        if candidates:
+            _echo_candidates(detected)
+            return
+
+        found = find_anchor(load_tests(store.conn), today, detected=detected)
         if found is None:
             typer.secho(
-                "No 5k result logged in the last few months, so there is nothing to "
-                "anchor paces on. Log a parkrun with `longrun ingest manual --tests`.",
+                "Nothing to anchor paces on: no 5k logged in the last few months, "
+                "and no hard 5k found inside a recent run. Log a parkrun with "
+                "`longrun ingest manual --tests`, or see `longrun anchor --candidates`.",
                 fg=typer.colors.YELLOW,
                 err=True,
             )
@@ -453,6 +472,12 @@ def anchor_command(ctx: typer.Context) -> None:
         typer.echo("")
         for line in anchor_paces(found):
             typer.echo(f"  {line}")
+        if found.confidence is Confidence.DETECTED:
+            typer.secho(
+                "\nThis came from a GPS trace, not a confirmed result. Logging the "
+                "parkrun gives a firmer anchor.",
+                fg=typer.colors.YELLOW,
+            )
         typer.echo("\nEasy pace is a ceiling, not a target; slower is usually better.")
 
 
@@ -569,6 +594,31 @@ def report_command(
             "This report contains cycle data. Treat the file as private.",
             fg=typer.colors.YELLOW,
         )
+
+
+def _echo_candidates(detected: Sequence[DetectedEffort]) -> None:
+    """List the 5k efforts found in recent runs, hardest first."""
+    if not detected:
+        typer.echo(
+            "No 5k splits found in recent runs. Detection needs the per-activity "
+            "streams, so check the runs were ingested with them."
+        )
+        return
+
+    typer.echo(f"{len(detected)} run(s) contained a 5k split:\n")
+    for effort in sorted(detected, key=lambda entry: entry.duration_s):
+        minutes, seconds = divmod(round(effort.duration_s), 60)
+        heart_rate = f"{effort.avg_hr:.0f} bpm" if effort.avg_hr is not None else "no HR"
+        marker = "*" if effort.is_hard else " "
+        hint = "  Saturday" if effort.looks_like_a_parkrun else ""
+        typer.echo(
+            f"  {marker} {effort.date:%Y-%m-%d}  {minutes}:{seconds:02d}  "
+            f"{heart_rate:<8}{hint}  {effort.activity_name}"
+        )
+    typer.echo(
+        "\n* hard enough to anchor on. Log the real parkrun with "
+        "`longrun ingest manual --tests` for a firmer anchor."
+    )
 
 
 def _readiness_note(readiness: Readiness) -> str:

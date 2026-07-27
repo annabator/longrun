@@ -269,8 +269,38 @@ uv run longrun plan --today  # just the next thing
 from Daniels and Gilbert's oxygen-cost and drop-dead curves, and equivalent
 distances from Riegel's endurance formula. The numbers land on the familiar
 ones because they share the same source relationships — nothing was copied.
-The anchor prefers a recent parkrun and takes the *best* result in a
-four-month window, so one slow morning cannot drop every training pace.
+The anchor takes the *best* result in a four-month window, so one slow
+morning cannot drop every training pace.
+
+### Finding the parkrun
+
+A watch names everything "Morning Run", so the name carries no signal. Instead
+`anchor` scans each recent run's distance stream for its **fastest continuous
+5 km**. That handles the common case of starting the watch before the start
+line and carrying on afterwards: the jog falls outside the winning window.
+It also removes a whole class of error — a split is exactly 5000 m by
+construction, so no GPS over-read has to be normalised away and no
+measurement artifact can flatter the result.
+
+An easy jog must never set race paces, so a split only counts when its mean
+heart rate reaches **92% of the athlete's own peak** (the 95th percentile of
+per-run `max_hr`, which ignores the cadence-lock spikes optical sensors
+produce). With too little history to calibrate that, or with no heart rate on
+the effort, detection stays off rather than guessing.
+
+**A logged parkrun always wins.** The course is fixed and measured and the
+result was confirmed by a person; a detected effort is inferred from a GPS
+trace and could be a net-downhill route or an over-reading watch. Detection
+fills the gap when nothing is logged — it never competes on speed.
+
+```bash
+uv run longrun anchor --candidates   # what was found, and what counted as hard
+```
+
+Known limits, all real: a treadmill's distance is whatever the belt claims;
+a net-downhill route flatters; a hard interval session can contain a fast 5 km;
+and detection needs streams, so a run ingested with `--no-streams` is
+invisible to it.
 
 **Readiness** compares this morning's rMSSD against a rolling seven-day
 baseline of its logarithm, with a normal range built from the recent standard

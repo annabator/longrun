@@ -5,7 +5,14 @@ import datetime as dt
 import pandas as pd
 import pytest
 
-from longrun.analysis.anchor import ANCHOR_WINDOW_DAYS, find_anchor, personal_best
+from longrun.analysis.anchor import (
+    ANCHOR_WINDOW_DAYS,
+    Confidence,
+    DetectedEffort,
+    find_anchor,
+    hard_effort_threshold,
+    personal_best,
+)
 from longrun.analysis.fitness import decoupling, efficiency_factor, run_metrics, trend
 
 TODAY = dt.date(2026, 6, 20)
@@ -90,6 +97,111 @@ def test_the_anchor_reports_its_vdot_and_provenance() -> None:
     assert anchor is not None
     assert anchor.vdot == pytest.approx(49.8, abs=0.5)
     assert "parkrun" in anchor.describe()
+
+
+def _effort(
+    duration_s: float,
+    *,
+    avg_hr: float | None = 178.0,
+    threshold: float | None = 160.0,
+    weekday: int = 5,
+    day: dt.date = dt.date(2026, 6, 6),
+) -> DetectedEffort:
+    """A detected 5k, hard by default."""
+    return DetectedEffort(
+        date=day,
+        duration_s=duration_s,
+        avg_hr=avg_hr,
+        hard_threshold=threshold,
+        weekday=weekday,
+        activity_name="Morning Run",
+    )
+
+
+def test_a_logged_parkrun_beats_a_faster_detected_effort() -> None:
+    """The course is fixed and the result confirmed; a GPS trace is neither.
+
+    A faster solo effort is worth knowing about, but it belongs in a re-test
+    suggestion rather than in a silent change of anchor.
+    """
+    tests = _tests_frame([("2026-06-06", "parkrun_5k", 1367.0, "s")])
+
+    anchor = find_anchor(tests, TODAY, detected=[_effort(1200.0)])
+
+    assert anchor is not None
+    assert anchor.result.duration_s == 1367.0
+    assert anchor.confidence is Confidence.LOGGED
+
+
+def test_detection_is_used_when_nothing_is_logged() -> None:
+    anchor = find_anchor(pd.DataFrame(), TODAY, detected=[_effort(1271.0)])
+
+    assert anchor is not None
+    assert anchor.result.duration_s == 1271.0
+    assert anchor.confidence is Confidence.DETECTED
+    assert "detected" in anchor.describe()
+
+
+def test_an_easy_effort_never_becomes_the_anchor() -> None:
+    """A jog setting race paces is the failure this gate exists to prevent."""
+    easy = _effort(1271.0, avg_hr=140.0, threshold=160.0)
+
+    assert easy.is_hard is False
+    assert find_anchor(pd.DataFrame(), TODAY, detected=[easy]) is None
+
+
+def test_an_effort_without_heart_rate_is_refused() -> None:
+    """Fail closed: a dead strap means the effort is skipped, not assumed."""
+    assert _effort(1271.0, avg_hr=None).is_hard is False
+
+
+def test_detection_is_off_without_a_calibrated_threshold() -> None:
+    """Too little history to know what hard means for this athlete."""
+    assert _effort(1271.0, threshold=None).is_hard is False
+
+
+def test_the_fastest_hard_effort_wins() -> None:
+    anchor = find_anchor(
+        pd.DataFrame(), TODAY, detected=[_effort(1400.0), _effort(1271.0), _effort(1500.0)]
+    )
+
+    assert anchor is not None
+    assert anchor.result.duration_s == 1271.0
+
+
+def test_a_saturday_effort_is_flagged_as_possibly_a_parkrun() -> None:
+    """A hint for the listing only; it never includes or excludes anything."""
+    saturday = _effort(1271.0, weekday=5)
+    wednesday = _effort(1271.0, weekday=2)
+
+    assert saturday.looks_like_a_parkrun is True
+    assert "parkrun" in saturday.describe()
+    assert wednesday.looks_like_a_parkrun is False
+    # Both are equally usable as anchors.
+    assert wednesday.is_hard is True
+
+
+def test_the_threshold_calibrates_to_the_athletes_own_peak() -> None:
+    runs = pd.DataFrame({"max_hr": [180.0] * 12})
+
+    threshold = hard_effort_threshold(runs)
+
+    assert threshold == pytest.approx(180.0 * 0.92)
+
+
+def test_the_threshold_ignores_a_cadence_lock_spike() -> None:
+    """An optical sensor reading 215 never happened and must not set the bar."""
+    runs = pd.DataFrame({"max_hr": [180.0] * 12 + [215.0]})
+
+    threshold = hard_effort_threshold(runs)
+
+    assert threshold is not None
+    assert threshold < 180.0
+
+
+def test_no_threshold_without_enough_runs() -> None:
+    assert hard_effort_threshold(pd.DataFrame({"max_hr": [180.0] * 3})) is None
+    assert hard_effort_threshold(pd.DataFrame()) is None
 
 
 def test_personal_best_picks_the_fastest() -> None:

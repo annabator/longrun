@@ -91,6 +91,17 @@ Rules the plan engine must keep:
   weekday, nothing is overdue, and readiness attaches notes rather than
   removing sessions.
 - **Cap the backlog.** Rollover past the cap drops the oldest sessions.
+- **A logged parkrun always outranks a detected effort**, however fast the
+  detected one is. A discrepancy belongs in an adaptation suggestion, never in
+  a silent change of anchor.
+- **Effort gates must be able to return nothing.** A percentile always admits
+  some fraction of runs, so it cannot say "nothing here was hard" - which is
+  exactly what a block of easy running needs it to say. Calibrate against the
+  athlete's own peak instead, and fail closed when there is too little data.
+
+Running metrics filter on `is_running_sport()`. Cycling reports a distance
+too, and summing it into weekly mileage is a bug that has already happened
+once. Cross-training is counted in sessions and load, never in distance.
 
 Do not build v1.2 features early. The plan engine must stay rule-based: a
 session menu or a readiness verdict is produced by thresholds that can be
