@@ -10,13 +10,20 @@ import pytest
 from longrun.analysis.cycle import cycles_from_days
 from longrun.models import Activity
 from longrun.report import build_report, load_report_data
-from longrun.report.figures import build_cycle_figure, build_wellness_figure
+from longrun.report.figures import (
+    build_cycle_figure,
+    build_load_context_figure,
+    build_wellness_figure,
+)
 from longrun.report.frames import (
     by_cycle_day,
     format_duration,
+    load_context_by_week,
     mark_personal_bests,
     metric_series,
+    other_activities,
     rolling_baseline,
+    running_activities,
     weekly_volume,
     wellness_series,
 )
@@ -237,6 +244,92 @@ def test_the_cycle_panel_actually_draws_its_phase_bands(seeded_store: Store) -> 
     kinds = [shape.type for shape in figure.layout.shapes]
     assert kinds.count("rect") >= 1
     assert kinds.count("line") >= 1
+
+
+def _mixed_activities() -> pd.DataFrame:
+    """A week holding a run, a long ride and a distance-less gym session."""
+    return pd.DataFrame(
+        {
+            "start_time": pd.to_datetime(["2026-06-15", "2026-06-16", "2026-06-17"], utc=True),
+            "sport_type": ["Run", "Ride", "WeightTraining"],
+            "name": ["Morning Run", "Commute", "Gym"],
+            "distance_m": [10000.0, 40000.0, 0.0],
+            "moving_time_s": [3000, 4800, 2700],
+            "avg_hr": [148.0, 132.0, None],
+            "icu_load": [80.0, 120.0, 22.0],
+        }
+    )
+
+
+def test_a_ride_is_not_counted_as_running_mileage() -> None:
+    """A 40km ride in the weekly running volume was the bug this fixes."""
+    weekly = weekly_volume(_mixed_activities())
+
+    assert weekly["distance_km"].sum() == pytest.approx(10.0)
+
+
+def test_running_and_other_activities_split_on_sport() -> None:
+    activities = _mixed_activities()
+
+    assert len(running_activities(activities)) == 1
+    assert len(other_activities(activities)) == 2
+
+
+def test_load_context_counts_sessions_and_load_not_distance() -> None:
+    weekly = load_context_by_week(_mixed_activities())
+
+    assert len(weekly) == 1
+    assert weekly["sessions"].iloc[0] == 2
+    assert weekly["load"].iloc[0] == pytest.approx(142.0)
+    assert "distance_km" not in weekly
+
+
+def test_load_context_is_empty_without_other_sports(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    assert load_context_by_week(data.activities).empty
+
+
+def test_the_cross_training_panel_appears_only_with_other_sports(
+    store: Store, tmp_path: Path, activity: Activity
+) -> None:
+    store.upsert_activities([activity])
+    without = build_report(load_report_data(store), tmp_path / "a.html").read_text(encoding="utf-8")
+
+    store.upsert_activities(
+        [activity.model_copy(update={"external_id": "ride", "sport_type": "Ride"})]
+    )
+    with_other = build_report(load_report_data(store), tmp_path / "b.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Cross-training" not in without
+    assert "Cross-training" in with_other
+
+
+def test_pace_is_blank_for_a_non_running_activity(
+    store: Store, tmp_path: Path, activity: Activity
+) -> None:
+    """A ride's pace reads as an absurd running pace, so it is not shown."""
+    store.upsert_activities(
+        [activity.model_copy(update={"external_id": "ride", "sport_type": "Ride"})]
+    )
+
+    document = build_report(load_report_data(store), tmp_path / "report.html").read_text(
+        encoding="utf-8"
+    )
+
+    table = document.split("<tbody>")[1].split("</tbody>")[0]
+    assert "Ride" in table
+    # Distance is real and kept; pace is not.
+    assert '<td class="num">10.00</td>' in table
+    assert '<td class="num">-</td>' in table
+
+
+def test_the_load_context_figure_builds_without_other_sports(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    assert build_load_context_figure(data) is not None
 
 
 def test_duration_formatting() -> None:

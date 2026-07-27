@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 from plotly.offline import get_plotlyjs
 
 from longrun.errors import ReportError
-from longrun.models import Metric
+from longrun.models import Metric, is_running_sport
 from longrun.report import figures, frames
 from longrun.report.theme import DARK, FONT_STACK, LIGHT, Palette
 
@@ -46,6 +46,7 @@ def build_report(data: frames.ReportData, output_path: Path, *, title: str = "lo
         wellness_div=_figure_div(figures.build_wellness_figure(data), "wellness"),
         cycle_section=_cycle_section(data),
         volume_div=_figure_div(figures.build_weekly_volume_figure(data), "volume"),
+        load_context_section=_load_context_section(data),
         activity_table=_activity_table(data),
         generated_at=dt.datetime.now(tz=dt.UTC),
     )
@@ -76,9 +77,14 @@ def _summary_tiles(data: frames.ReportData) -> str:
     tiles: list[tuple[str, str, str]] = []
 
     if not data.activities.empty:
-        total_km = float(data.activities["distance_m"].sum()) / 1000.0
-        tiles.append(("Activities", f"{len(data.activities):,}", "ingested"))
-        tiles.append(("Distance", f"{total_km:,.0f}", "km total"))
+        # Running only: a ride's distance is real, but it is not mileage.
+        runs = frames.running_activities(data.activities)
+        others = frames.other_activities(data.activities)
+        total_km = float(runs["distance_m"].sum()) / 1000.0 if not runs.empty else 0.0
+        tiles.append(("Runs", f"{len(runs):,}", "ingested"))
+        tiles.append(("Distance", f"{total_km:,.0f}", "km running"))
+        if not others.empty:
+            tiles.append(("Cross-training", f"{len(others):,}", "other sessions"))
 
     parkrun = frames.metric_series(data.tests, Metric.PARKRUN_5K)
     if not parkrun.empty:
@@ -102,6 +108,22 @@ def _summary_tiles(data: frames.ReportData) -> str:
         for label, value, note in tiles
     )
     return f'    <section class="tiles">\n{cells}\n    </section>'
+
+
+def _load_context_section(data: frames.ReportData) -> str:
+    """Render the cross-training panel, or nothing when there is none."""
+    if frames.other_activities(data.activities).empty:
+        return ""
+    figure = _figure_div(figures.build_load_context_figure(data), "load-context")
+    return f"""  <section>
+    <h2>Cross-training</h2>
+    <p class="note">
+      Everything that is not running, counted in sessions and in the load
+      Intervals.icu computes rather than in distance. A heavy week here
+      explains a tired run that the running log on its own does not.
+    </p>
+    {figure}
+  </section>"""
 
 
 def _cycle_section(data: frames.ReportData) -> str:
@@ -152,7 +174,13 @@ def _activity_table(data: frames.ReportData) -> str:
         dates, names, sports, distances, moving_times, heart_rates, strict=True
     ):
         distance_km = float(distance_m) / 1000.0
-        pace = frames.format_duration(moving_s / distance_km) if distance_km > 0 else "-"
+        # Pace is a running idea. Printing one for a ride reads as an absurd
+        # running pace rather than as the cycling speed it actually is.
+        pace = (
+            frames.format_duration(moving_s / distance_km)
+            if distance_km > 0 and is_running_sport(sport)
+            else "-"
+        )
         heart_rate = "-" if pd.isna(avg_hr) else f"{float(avg_hr):.0f}"
         rows.append(
             "        <tr>"
@@ -193,6 +221,7 @@ def _render_document(
     wellness_div: str,
     cycle_section: str,
     volume_div: str,
+    load_context_section: str,
     activity_table: str,
     generated_at: dt.datetime,
 ) -> str:
@@ -247,8 +276,13 @@ def _render_document(
 {cycle_section}
   <section>
     <h2>Weekly running volume</h2>
+    <p class="note">
+      Running only. Cycling and other sports record a distance too, but it is
+      not mileage and is not counted here.
+    </p>
     {volume_div}
   </section>
+{load_context_section}
   <section>
     <h2>Recent activities</h2>
 {activity_table}

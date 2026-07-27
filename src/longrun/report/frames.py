@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from longrun.analysis.cycle import Cycle
-from longrun.models import Metric
+from longrun.models import Metric, is_running_sport
 from longrun.store import Store
 
 RESTING_HR_WINDOW = "28D"
@@ -285,17 +285,81 @@ def weekly_volume(activities: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A frame with `week_start` and `distance_km` columns.
     """
-    if activities.empty:
+    runs = running_activities(activities)
+    if runs.empty:
         return pd.DataFrame(columns=["week_start", "distance_km"])
 
     weekly = (
-        activities.set_index("start_time")["distance_m"]
+        runs.set_index("start_time")["distance_m"]
         .resample("W-MON", label="left", closed="left")
         .sum()
         .div(1000.0)
     )
     week_starts = pd.DatetimeIndex(weekly.index).tz_localize(None)
     return pd.DataFrame({"week_start": week_starts, "distance_km": weekly.to_numpy()})
+
+
+def running_activities(activities: pd.DataFrame) -> pd.DataFrame:
+    """Return only the activities that are running.
+
+    Cycling reports a distance too, so anything summing `distance_m` across
+    every sport quietly counts a ride as mileage. Filtering here keeps the
+    panel titled "weekly running volume" honest.
+
+    Args:
+        activities: The activities frame.
+
+    Returns:
+        The running subset, empty if there is none.
+    """
+    if activities.empty or "sport_type" not in activities:
+        return activities
+    return activities.loc[activities["sport_type"].astype(str).map(is_running_sport)]
+
+
+def other_activities(activities: pd.DataFrame) -> pd.DataFrame:
+    """Return the activities that are not running.
+
+    Args:
+        activities: The activities frame.
+
+    Returns:
+        The non-running subset, empty if there is none.
+    """
+    if activities.empty or "sport_type" not in activities:
+        return activities.iloc[0:0]
+    return activities.loc[~activities["sport_type"].astype(str).map(is_running_sport)]
+
+
+def load_context_by_week(activities: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate non-running sessions into weekly counts and load.
+
+    Cross-training still costs something, and a heavy week of it explains a
+    tired run better than the running log alone does. Counted in sessions and
+    in the load figure Intervals.icu computes, since distance means nothing
+    across a swim, a gym session and a windsurf.
+
+    Args:
+        activities: The activities frame.
+
+    Returns:
+        A frame with `week_start`, `sessions` and `load`.
+    """
+    others = other_activities(activities)
+    columns = ["week_start", "sessions", "load"]
+    if others.empty:
+        return pd.DataFrame(columns=columns)
+
+    indexed = others.set_index("start_time")
+    weekly = indexed.resample("W-MON", label="left", closed="left")
+    sessions = weekly.size()
+    load = (
+        weekly["icu_load"].sum() if "icu_load" in others else pd.Series(0.0, index=sessions.index)
+    )
+    week_starts = pd.DatetimeIndex(sessions.index).tz_localize(None)
+    return pd.DataFrame(
+        {"week_start": week_starts, "sessions": sessions.to_numpy(), "load": load.to_numpy()}
+    )
 
 
 def format_duration(seconds: float) -> str:

@@ -299,6 +299,64 @@ def _median_ovulation_day(cycles: Sequence[Cycle]) -> int | None:
     return int(median(days)) if days else None
 
 
+def build_load_context_figure(data: frames.ReportData) -> go.Figure:
+    """Build the cross-training view: non-running sessions per week.
+
+    Counted in sessions and in the load figure Intervals.icu computes, not in
+    distance: distance means nothing across a swim, a gym session and an hour
+    of windsurfing, and summing it with running mileage is what this panel
+    exists to stop.
+
+    Args:
+        data: Loaded report frames.
+
+    Returns:
+        The cross-training figure.
+    """
+    weekly = frames.load_context_by_week(data.activities)
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        subplot_titles=("Sessions per week", "Training load per week"),
+    )
+
+    if weekly.empty:
+        _annotate_empty(figure, row=1)
+        _annotate_empty(figure, row=2)
+    else:
+        figure.add_bar(
+            x=weekly["week_start"],
+            y=weekly["sessions"],
+            name="Sessions",
+            marker={"color": LIGHT.series, "line": {"width": 0}},
+            meta={"role": ROLE_SERIES},
+            hovertemplate="Week of %{x|%d %b %Y}<br>%{y} sessions<extra></extra>",
+            row=1,
+            col=1,
+        )
+        figure.add_bar(
+            x=weekly["week_start"],
+            y=weekly["load"],
+            name="Load",
+            marker={"color": LIGHT.series, "line": {"width": 0}},
+            meta={"role": ROLE_SERIES},
+            hovertemplate="Week of %{x|%d %b %Y}<br>load %{y:.0f}<extra></extra>",
+            row=2,
+            col=1,
+        )
+
+    figure.update_layout(
+        height=_PANEL_HEIGHT_PX * 2,
+        showlegend=False,
+        bargap=0.25,
+        hovermode="x unified",
+    )
+    _apply_base_layout(figure)
+    return figure
+
+
 def build_weekly_volume_figure(data: frames.ReportData) -> go.Figure:
     """Build the weekly running volume bar chart.
 

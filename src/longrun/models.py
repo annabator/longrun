@@ -27,6 +27,29 @@ class Source(StrEnum):
     SYNTHETIC = "synthetic"
 
 
+RUNNING_SPORT_TYPES = frozenset(
+    {"run", "trailrun", "virtualrun", "treadmillrun", "running", "track"}
+)
+"""Sport labels that count as running, lower-cased.
+
+Providers spell these differently and add new ones, so matching is on this
+set rather than an enum: an unrecognised sport is simply not running, which
+is the safe way to be wrong.
+"""
+
+
+def is_running_sport(sport_type: str) -> bool:
+    """Return whether a sport label describes running.
+
+    Args:
+        sport_type: The stored `sport_type` value.
+
+    Returns:
+        True for running of any kind.
+    """
+    return sport_type.strip().lower().replace(" ", "").replace("_", "") in RUNNING_SPORT_TYPES
+
+
 class Metric(StrEnum):
     """Well-known metric names for :class:`TestResult`.
 
