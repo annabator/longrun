@@ -74,6 +74,13 @@ def activity_from_payload(payload: Mapping[str, Any]) -> Activity:
         IngestError: If required fields are absent or unparseable.
     """
     activity_id = _first(payload, _ACTIVITY_KEYS["id"])
+    # Only the identity and the timestamp are genuinely required. Distance and
+    # duration are absent from whole categories of activity - a gym session,
+    # yoga, windsurfing - and those are worth storing as load context even
+    # though they cover no ground. Treating them as required rejected real
+    # sessions and, worse, stopped the sync that met them.
+    moving = _number(payload, _ACTIVITY_KEYS["moving_time"])
+    elapsed = _number(payload, _ACTIVITY_KEYS["elapsed_time"])
     try:
         return Activity(
             source=Source.INTERVALS,
@@ -81,14 +88,9 @@ def activity_from_payload(payload: Mapping[str, Any]) -> Activity:
             start_time=_parse_timestamp(str(_require(payload, _ACTIVITY_KEYS["start"], "start"))),
             sport_type=str(_first(payload, _ACTIVITY_KEYS["sport"]) or "Unknown"),
             name=str(_first(payload, _ACTIVITY_KEYS["name"]) or "Untitled"),
-            distance_m=float(_require(payload, _ACTIVITY_KEYS["distance"], "distance")),
-            moving_time_s=int(float(_require(payload, _ACTIVITY_KEYS["moving_time"], "time"))),
-            elapsed_time_s=int(
-                float(
-                    _first(payload, _ACTIVITY_KEYS["elapsed_time"])
-                    or _require(payload, _ACTIVITY_KEYS["moving_time"], "time")
-                )
-            ),
+            distance_m=_number(payload, _ACTIVITY_KEYS["distance"]) or 0.0,
+            moving_time_s=int(moving if moving is not None else elapsed or 0.0),
+            elapsed_time_s=int(elapsed if elapsed is not None else moving or 0.0),
             avg_hr=_number(payload, _ACTIVITY_KEYS["avg_hr"]),
             max_hr=_number(payload, _ACTIVITY_KEYS["max_hr"]),
             avg_speed=_number(payload, _ACTIVITY_KEYS["avg_speed"]),

@@ -49,8 +49,8 @@ def test_subjective_and_load_fields_are_mapped() -> None:
 
 
 def test_missing_optional_fields_stay_none() -> None:
-    """Not every activity is rated, and a gym session has no distance."""
-    _, long_run, tennis = _load("intervals_activities.json")
+    """Not every activity is rated."""
+    _, long_run, tennis, *_ = _load("intervals_activities.json")
 
     mapped_long = activity_from_payload(long_run)
     mapped_tennis = activity_from_payload(tennis)
@@ -60,6 +60,43 @@ def test_missing_optional_fields_stay_none() -> None:
     assert mapped_long.icu_intensity is None
     assert mapped_tennis.sport_type == "Tennis"
     assert mapped_tennis.distance_m == 0.0
+
+
+def test_an_activity_without_distance_is_still_stored() -> None:
+    """A windsurf session covers no recorded ground but is still load.
+
+    Real data: this shape used to be rejected outright, which also stopped
+    the sync that met it.
+    """
+    windsurf = _load("intervals_activities.json")[3]
+
+    activity = activity_from_payload(windsurf)
+
+    assert activity.sport_type == "Windsurf"
+    assert activity.distance_m == 0.0
+    assert activity.elapsed_time_s == 3600
+    # No moving time was sent, so elapsed stands in rather than failing.
+    assert activity.moving_time_s == 3600
+    assert activity.icu_load == pytest.approx(30.0)
+
+
+def test_an_activity_with_neither_distance_nor_duration_is_still_stored() -> None:
+    """A gym entry can be little more than a timestamp and a load figure."""
+    gym = _load("intervals_activities.json")[4]
+
+    activity = activity_from_payload(gym)
+
+    assert activity.sport_type == "WeightTraining"
+    assert activity.distance_m == 0.0
+    assert activity.moving_time_s == 0
+    assert activity.elapsed_time_s == 0
+    assert activity.icu_load == pytest.approx(22.0)
+
+
+def test_an_activity_without_a_timestamp_is_still_rejected() -> None:
+    """Identity and a time are the only things genuinely required."""
+    with pytest.raises(IngestError, match="i999"):
+        activity_from_payload({"id": "i999", "type": "Run", "distance": 5000})
 
 
 def test_naive_local_start_is_treated_as_utc() -> None:

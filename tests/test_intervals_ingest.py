@@ -13,6 +13,11 @@ from longrun.store import Store
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
+# Derived rather than hardcoded: the fixture gains activities as real
+# shapes turn up, and the counts should follow it.
+ACTIVITY_COUNT = len(json.loads((FIXTURES / "intervals_activities.json").read_text()))
+STREAM_SAMPLES_PER_ACTIVITY = 5
+
 
 def _fixture(name: str) -> Any:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
@@ -61,11 +66,11 @@ def test_ingest_writes_activities_streams_and_wellness(store: Store) -> None:
     summary = IntervalsIngester(client).ingest(store)
 
     counts = store.counts()
-    assert counts["activities"] == 3
-    assert counts["activity_streams"] == 15  # 5 samples for each of 3 activities
+    assert counts["activities"] == ACTIVITY_COUNT
+    assert counts["activity_streams"] == ACTIVITY_COUNT * STREAM_SAMPLES_PER_ACTIVITY
     # The date-only record carries no measurement and is not stored.
     assert counts["wellness_daily"] == 3
-    assert summary.activities == 3
+    assert summary.activities == ACTIVITY_COUNT
     assert summary.wellness_days == 3
 
 
@@ -140,7 +145,7 @@ def test_second_run_skips_activities_that_already_have_streams(store: Store) -> 
     calls: list[str] = []
     summary = IntervalsIngester(_client(calls)).ingest(store)
 
-    assert summary.streams_skipped == 3
+    assert summary.streams_skipped == ACTIVITY_COUNT
     assert not any(path.endswith("/streams") for path in calls)
 
 
@@ -205,8 +210,8 @@ def test_missing_activity_file_is_not_an_error(store: Store) -> None:
 
     summary = IntervalsIngester(_client(calls), with_rr=True).ingest(store)
 
-    assert summary.activities == 3
-    assert store.counts()["activities"] == 3
+    assert summary.activities == ACTIVITY_COUNT
+    assert store.counts()["activities"] == ACTIVITY_COUNT
 
 
 def test_unparseable_activity_file_is_reported_not_fatal(store: Store) -> None:
@@ -219,8 +224,54 @@ def test_unparseable_activity_file_is_reported_not_fatal(store: Store) -> None:
         store, progress=lines.append
     )
 
-    assert summary.activities == 3
+    assert summary.activities == ACTIVITY_COUNT
     assert any("could not be parsed" in line for line in lines)
+
+
+def test_one_unparseable_activity_does_not_end_the_sync(store: Store) -> None:
+    """A sync that has already written rows must not be lost to one bad entry."""
+    broken = [*_fixture("intervals_activities.json"), {"id": "i999", "type": "Run"}]
+    calls: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(path)
+        if path.endswith("/activities"):
+            served = any(other.endswith("/activities") for other in calls[:-1])
+            return httpx.Response(200, json=[] if served else broken)
+        if path.endswith("/wellness"):
+            return httpx.Response(200, json=[])
+        if path.endswith("/streams"):
+            return httpx.Response(200, json=_fixture("intervals_streams.json"))
+        return httpx.Response(404, json={})
+
+    client = IntervalsClient(
+        "i1234",
+        "key",
+        http=httpx.Client(transport=httpx.MockTransport(handle)),
+        sleep=lambda _: None,
+    )
+    lines: list[str] = []
+
+    summary = IntervalsIngester(client).ingest(store, progress=lines.append)
+
+    assert summary.activities == ACTIVITY_COUNT
+    assert store.counts()["activities"] == ACTIVITY_COUNT
+    assert any("skipped an activity" in line for line in lines)
+    assert any("could not be parsed" in line for line in lines)
+
+
+def test_activities_without_distance_are_stored_as_load_context(store: Store) -> None:
+    IntervalsIngester(_client([])).ingest(store)
+
+    rows = store.conn.execute(
+        "SELECT sport_type, distance_m, icu_load FROM activities WHERE external_id IN (?, ?)",
+        ("i84224001", "i84225500"),
+    ).fetchall()
+
+    assert len(rows) == 2
+    assert all(row["distance_m"] == 0.0 for row in rows)
+    assert all(row["icu_load"] is not None for row in rows)
 
 
 def test_rows_are_labelled_with_their_source(store: Store) -> None:

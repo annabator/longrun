@@ -99,8 +99,18 @@ class IntervalsIngester:
         skipped = 0
         rr_activities = 0
 
+        skipped_unparseable = 0
         for payload in self._client.iter_activities(oldest):
-            activity = activity_from_payload(payload)
+            try:
+                activity = activity_from_payload(payload)
+            except IngestError as exc:
+                # One odd activity must not end a sync that has already
+                # written others. Report it and carry on, the way the FIT
+                # adapter does with a corrupt file.
+                skipped_unparseable += 1
+                report(f"  skipped an activity: {exc}")
+                continue
+
             store.upsert_activities([activity])
             activities += 1
             report(f"  {activity.start_time:%Y-%m-%d}  {activity.name}")
@@ -127,6 +137,8 @@ class IntervalsIngester:
 
         if self._with_rr:
             report(f"Recovered beat-to-beat intervals for {rr_activities} activities")
+        if skipped_unparseable:
+            report(f"{skipped_unparseable} activity(ies) could not be parsed and were skipped")
 
         return IngestSummary(
             activities=activities,

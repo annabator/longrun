@@ -39,5 +39,20 @@
     "moving_time": 4500,
     "elapsed_time": 5400,
     "icu_training_load": 44.0
+  },
+  {
+    "id": "i84224001",
+    "start_date_local": "2026-06-23T12:10:00",
+    "type": "Windsurf",
+    "name": "Lunch Windsurf",
+    "elapsed_time": 3600,
+    "icu_training_load": 30.0
+  },
+  {
+    "id": "i84225500",
+    "start_date_local": "2026-06-24T07:00:00",
+    "type": "WeightTraining",
+    "name": "Gym",
+    "icu_training_load": 22.0
   }
 ]
