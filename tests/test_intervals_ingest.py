@@ -1,5 +1,6 @@
 """End-to-end Intervals ingestion against a mocked API."""
 
+import datetime as dt
 import gzip
 import json
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any
 import httpx
 
 from longrun.ingest.intervals import IntervalsClient, IntervalsIngester
-from longrun.models import Source
+from longrun.models import Source, WellnessDay
 from longrun.store import Store
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -259,6 +260,32 @@ def test_one_unparseable_activity_does_not_end_the_sync(store: Store) -> None:
     assert store.counts()["activities"] == ACTIVITY_COUNT
     assert any("skipped an activity" in line for line in lines)
     assert any("could not be parsed" in line for line in lines)
+
+
+def test_a_sync_never_overwrites_a_manually_entered_weight(store: Store) -> None:
+    """A sync must not replace a weight the athlete entered themselves.
+
+    Wellness merges field by field, so an ingested weight would overwrite a
+    real one rather than sitting beside it.
+    """
+    store.upsert_wellness([WellnessDay(date=dt.date(2026, 6, 20), weight_kg=61.4, source="manual")])
+
+    IntervalsIngester(_client([])).ingest(store)
+
+    row = store.conn.execute(
+        "SELECT weight_kg, hrv_rmssd FROM wellness_daily WHERE date = ?", ("2026-06-20",)
+    ).fetchone()
+    assert row["weight_kg"] == 61.4
+    # The rest of the day still came from the sync.
+    assert row["hrv_rmssd"] == 68.2
+
+
+def test_no_weight_arrives_from_a_sync_at_all(store: Store) -> None:
+    IntervalsIngester(_client([])).ingest(store)
+
+    weights = store.conn.execute("SELECT COUNT(weight_kg) n FROM wellness_daily").fetchone()["n"]
+
+    assert weights == 0
 
 
 def test_activities_without_distance_are_stored_as_load_context(store: Store) -> None:

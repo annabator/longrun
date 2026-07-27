@@ -66,9 +66,7 @@ def main() -> None:
         ).fetchall()
         for row in rows:
             load = f"{row['load']:.0f}" if row["load"] is not None else "-"
-            report.line(
-                f"{row['sport_type']:<22} {row['n']:>4}  {row['km']:>8.1f} km  load {load}"
-            )
+            report.line(f"{row['sport_type']:<22} {row['n']:>4}  {row['km']:>8.1f} km  load {load}")
 
         row = conn.execute("SELECT MIN(start_time) a, MAX(start_time) b FROM activities").fetchone()
         report.section("date range")

@@ -35,6 +35,11 @@ averaged to one value per second to fit `activity_streams`; that is fine for
 heart-rate recovery between reps, but per-beat analysis (artifact or ectopic
 detection) would need its own storage rather than that table.
 
+Weight is never read from Intervals.icu. It repeats the sign-up figure on
+every wellness record, so it is a constant wearing a measurement's clothes;
+ingesting it would flatten the weight trend and overwrite manual entries,
+since wellness merges field by field. Weight arrives by CSV only.
+
 The rolling CTL, ATL and form figures were removed in schema v3. They are
 averages over a modelled load, and this project prefers the measured series
 they derive from. Per-activity `icu_load` stays on `activities`. Do not

@@ -117,11 +117,17 @@ erase a resting HR that came from a different export.
 | Beat-to-beat R-R | ✅ with `--rr` | ✅ | – |
 | Weight, VO₂max, bloods, parkrun | – | – | ✅ |
 
-Deliberately not stored: the rolling CTL, ATL and form figures. They are
-exponentially weighted averages over a load that is itself modelled, and this
-project prefers the measured series — HRV, resting heart rate, sleep — that
-they are derived from. Per-activity `icu_load` is kept, and Intervals.icu
-remains the place to read the rolling versions.
+Two things Intervals.icu returns are deliberately not stored:
+
+- **CTL, ATL and form** — exponentially weighted averages over a load that is
+  itself modelled. This project prefers the measured series they derive from.
+  Per-activity `icu_load` is kept, and Intervals.icu remains the place to read
+  the rolling versions.
+- **Weight** — Intervals repeats the figure entered once at sign-up on every
+  daily record, so it is a profile setting rather than a measurement.
+  Ingesting it would draw a flat line through the weight trend and, because
+  wellness merges field by field, would overwrite a weight entered by hand.
+  **Weight comes from a CSV only.**
 
 R-R intervals are not in the Intervals.icu streams API, so `--rr` downloads
 each activity's file and reads the beats out of it: the original upload first,

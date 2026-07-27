@@ -47,8 +47,12 @@ _WELLNESS_KEYS: Mapping[str, tuple[str, ...]] = {
     "sleep_secs": ("sleepSecs", "sleep_secs", "sleepTime"),
     "sleep_hours": ("sleepHours", "sleep_hours", "sleep"),
     "spo2": ("spO2", "spo2", "SpO2"),
-    "weight": ("weight", "weight_kg"),
 }
+# `weight` is deliberately absent. Intervals.icu carries the figure entered
+# once at sign-up on every wellness record, so it is a constant rather than a
+# measurement. Ingesting it would flatten the weight trend into a straight
+# line and, because wellness merges field by field, a later sync would
+# overwrite a real weight entered by hand. Weight comes from a CSV only.
 
 _STREAM_FIELD_BY_TYPE: Mapping[str, str] = {
     "heartrate": "hr",
@@ -109,9 +113,11 @@ def activity_from_payload(payload: Mapping[str, Any]) -> Activity:
 def wellness_from_payload(payload: Mapping[str, Any]) -> WellnessDay:
     """Build a :class:`WellnessDay` from an Intervals.icu wellness record.
 
-    The rolling CTL, ATL and form figures the endpoint also returns are
-    deliberately ignored: they are averages over a modelled load rather than
-    measurements, and Intervals.icu remains the place to read them.
+    Two things the endpoint returns are deliberately ignored. The rolling CTL,
+    ATL and form figures are averages over a modelled load rather than
+    measurements, and Intervals.icu remains the place to read them. Weight is
+    the value entered once at sign-up, repeated unchanged on every record, so
+    it is a profile setting wearing a measurement's clothes.
 
     Args:
         payload: One record from the wellness endpoint.
@@ -140,7 +146,8 @@ def wellness_from_payload(payload: Mapping[str, Any]) -> WellnessDay:
         sleep_score=_number(payload, _WELLNESS_KEYS["sleep_score"]),
         sleep_hours=_sleep_hours(payload),
         spo2=_number(payload, _WELLNESS_KEYS["spo2"]),
-        weight_kg=_number(payload, _WELLNESS_KEYS["weight"]),
+        # Never read from this source; see the note on _WELLNESS_KEYS.
+        weight_kg=None,
         source=Source.INTERVALS,
     )
 

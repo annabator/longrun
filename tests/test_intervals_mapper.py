@@ -126,7 +126,6 @@ def test_wellness_camel_case_fields_are_mapped() -> None:
     assert day.hrv_rmssd == pytest.approx(68.2)
     assert day.sleep_score == pytest.approx(84.0)
     assert day.spo2 == pytest.approx(97.0)
-    assert day.weight_kg == pytest.approx(61.1)
     assert day.source == Source.INTERVALS
 
 
@@ -134,6 +133,19 @@ def test_sleep_seconds_become_hours() -> None:
     record = _load("intervals_wellness.json")[0]
 
     assert wellness_from_payload(record).sleep_hours == pytest.approx(7.5)
+
+
+def test_weight_from_intervals_is_ignored() -> None:
+    """Intervals repeats the sign-up weight on every record.
+
+    It is a profile setting, not a measurement, so ingesting it would draw a
+    flat line through the weight trend. The fixture carries one; the mapper
+    must drop it.
+    """
+    record = _load("intervals_wellness.json")[0]
+
+    assert record["weight"] == pytest.approx(61.1)
+    assert wellness_from_payload(record).weight_kg is None
 
 
 def test_rolling_load_fields_are_ignored() -> None:
