@@ -169,7 +169,9 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     panels = (
         ("HRV rMSSD (ms)", data.wellness, "date", "hrv_rmssd"),
         ("Resting heart rate (bpm)", data.wellness, "date", "resting_hr"),
-        ("Session RPE", data.activities, "start_time", "rpe"),
+        # Feel rather than RPE: a watch fills this in on its own, where RPE
+        # only exists if someone types it, and an empty panel says nothing.
+        ("Session feel (higher is better)", data.activities, "start_time", "feel"),
     )
     figure = make_subplots(
         rows=len(panels),

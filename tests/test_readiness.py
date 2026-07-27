@@ -133,7 +133,6 @@ def test_several_factors_together_are_red() -> None:
             hrv_rmssd=20.0,
             resting_hr=55.0,
             sleep_hours=4.0,
-            rpe=9.0,
         ),
     ]
 
@@ -143,13 +142,22 @@ def test_several_factors_together_are_red() -> None:
     assert len(verdict.reasons) >= 3
 
 
-def test_a_hard_session_the_day_before_fires() -> None:
-    readings = [*_steady(), DailyReading(date=TODAY, hrv_rmssd=60.0, resting_hr=48.0, rpe=9.0)]
+def test_the_verdict_rests_on_the_measured_signals_alone() -> None:
+    """Nothing asks the athlete to rate anything.
+
+    A morning with no subjective rating at all must still reach a full
+    verdict from HRV, resting heart rate and sleep.
+    """
+    readings = [
+        *_steady(),
+        DailyReading(date=TODAY - dt.timedelta(days=1), hrv_rmssd=20.0),
+        DailyReading(date=TODAY, hrv_rmssd=20.0, resting_hr=55.0, sleep_hours=4.0),
+    ]
 
     verdict = assess(readings, TODAY)
 
-    assert verdict.readiness is Readiness.AMBER
-    assert any("out of 10" in reason for reason in verdict.reasons)
+    assert verdict.readiness is Readiness.RED
+    assert all("rated" not in reason for reason in verdict.reasons)
 
 
 def test_a_session_that_felt_poor_fires() -> None:

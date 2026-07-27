@@ -15,9 +15,13 @@ being precise about why each part is there.
   standard deviation, and only readings outside it are treated as signal.
 
 Suppression is not called from HRV alone. A low morning that comes with an
-elevated resting heart rate, poor sleep, or a session that felt far harder
-than it should have is a different thing from a low morning on its own, and
-the verdict says which factors fired.
+elevated resting heart rate or poor sleep is a different thing from a low
+morning on its own, and the verdict says which factors fired.
+
+The signals that matter are the measured ones: HRV, resting heart rate and
+sleep. Nothing here asks the athlete to rate anything, and nothing depends on
+a rating existing. Where a post-session feel happens to have been recorded it
+is used, and where it has not the verdict is unaffected.
 
 Everything here is a rule with a number attached, chosen so that it can be
 tested against fixed inputs and argued with.
@@ -48,13 +52,12 @@ RESTING_HR_ELEVATION_BPM = 3.0
 POOR_SLEEP_HOURS = 6.0
 """Sleep below this counts as a contributing factor."""
 
-HIGH_RPE = 8.0
-"""Session RPE at or above this counts as a contributing factor."""
-
 LOW_FEEL = 2.0
 """Post-session feel at or below this counts as a contributing factor.
 
 Intervals.icu records feel on a rising scale, so a low number is a bad day.
+Optional, like everything subjective here: it fires when a rating happens to
+be there and is silent when it is not.
 """
 
 AMBER_FACTORS = 1
@@ -86,15 +89,14 @@ class DailyReading:
         hrv_rmssd: Morning rMSSD in milliseconds.
         resting_hr: Morning resting heart rate.
         sleep_hours: Hours slept.
-        rpe: Hardest session RPE logged that day, if any.
-        feel: Worst post-session feel logged that day, if any.
+        feel: Worst post-session feel logged that day, if any. Optional, and
+            usually absent: nothing asks for it.
     """
 
     date: dt.date
     hrv_rmssd: float | None = None
     resting_hr: float | None = None
     sleep_hours: float | None = None
-    rpe: float | None = None
     feel: float | None = None
 
 
@@ -229,10 +231,6 @@ def assess(readings: Sequence[DailyReading], today: dt.date) -> ReadinessVerdict
     if reading.sleep_hours is not None and reading.sleep_hours < POOR_SLEEP_HOURS:
         factors += 1
         reasons.append(f"only {reading.sleep_hours:.1f} hours of sleep")
-
-    if reading.rpe is not None and reading.rpe >= HIGH_RPE:
-        factors += 1
-        reasons.append(f"yesterday's session was rated {reading.rpe:.0f} out of 10")
 
     if reading.feel is not None and reading.feel <= LOW_FEEL:
         factors += 1

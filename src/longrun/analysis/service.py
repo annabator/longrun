@@ -20,8 +20,8 @@ from longrun.store import Store
 def daily_readings(store: Store, since: dt.date) -> list[DailyReading]:
     """Build readiness inputs from wellness and the sessions around them.
 
-    RPE and feel are attached to the day *after* the session they describe,
-    since that is the morning the cost of it shows up in.
+    A post-session feel, where one exists, is attached to the day *after* the
+    session it describes, since that is the morning its cost shows up in.
 
     Args:
         store: An initialised store.
@@ -40,11 +40,11 @@ def daily_readings(store: Store, since: dt.date) -> list[DailyReading]:
         return []
 
     sessions = pd.read_sql_query(
-        "SELECT start_time, rpe, feel FROM activities WHERE start_time >= ?",
+        "SELECT start_time, feel FROM activities WHERE start_time >= ?",
         store.conn,
         params=(since.isoformat(),),
     )
-    hardest, worst = _session_signals(sessions)
+    worst = _worst_feel_by_day(sessions)
 
     readings: list[DailyReading] = []
     for row in wellness.itertuples():
@@ -57,7 +57,6 @@ def daily_readings(store: Store, since: dt.date) -> list[DailyReading]:
                 hrv_rmssd=_optional(row.hrv_rmssd),
                 resting_hr=_optional(row.resting_hr),
                 sleep_hours=_optional(row.sleep_hours),
-                rpe=hardest.get(yesterday),
                 feel=worst.get(yesterday),
             )
         )
@@ -148,24 +147,18 @@ def completed_session_names(store: Store, week_start: dt.date) -> list[str]:
     return [str(row["name"]).lower() for row in rows]
 
 
-def _session_signals(
-    sessions: pd.DataFrame,
-) -> tuple[dict[dt.date, float], dict[dt.date, float]]:
-    """Return the hardest RPE and worst feel logged on each day."""
-    hardest: dict[dt.date, float] = {}
+def _worst_feel_by_day(sessions: pd.DataFrame) -> dict[dt.date, float]:
+    """Return the lowest post-session feel recorded on each day."""
     worst: dict[dt.date, float] = {}
     if sessions.empty:
-        return hardest, worst
+        return worst
 
     for row in sessions.itertuples():
         day = pd.Timestamp(str(row.start_time)).date()
-        rpe = _optional(row.rpe)
         feel = _optional(row.feel)
-        if rpe is not None:
-            hardest[day] = max(hardest.get(day, rpe), rpe)
         if feel is not None:
             worst[day] = min(worst.get(day, feel), feel)
-    return hardest, worst
+    return worst
 
 
 def _optional(value: Any) -> float | None:

@@ -311,9 +311,13 @@ invisible to it.
 **Readiness** compares this morning's rMSSD against a rolling seven-day
 baseline of its logarithm, with a normal range built from the recent standard
 deviation. A single low reading is noise and is reported as such; it takes
-several signals agreeing — HRV plus an elevated resting heart rate, poor
-sleep, a session that felt wrong — before the verdict moves. Every verdict
-lists what fired.
+several signals agreeing — HRV plus an elevated resting heart rate or poor
+sleep — before the verdict moves. Every verdict lists what fired.
+
+It rests on the measured signals. **Nothing asks you to rate a session**: RPE
+is never required, and a post-session feel is used only where a watch happened
+to record one. A full verdict is reachable from HRV, resting heart rate and
+sleep alone.
 
 **The menu is not a schedule.** It is a prioritised list of what is worth
 doing this week. Nothing is assigned to a day, nothing is late, and anything

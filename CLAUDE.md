@@ -96,6 +96,9 @@ Rules the plan engine must keep:
   weekday, nothing is overdue, and readiness attaches notes rather than
   removing sessions.
 - **Cap the backlog.** Rollover past the cap drops the oldest sessions.
+- **Never require a subjective rating.** Readiness rests on HRV, resting heart
+  rate and sleep. RPE is not used at all, and feel is read only where a watch
+  supplied one. Do not add a factor that needs the athlete to type something.
 - **A logged parkrun always outranks a detected effort**, however fast the
   detected one is. A discrepancy belongs in an adaptation suggestion, never in
   a silent change of anchor.
