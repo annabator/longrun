@@ -84,6 +84,32 @@ the series descriptively and let the reader look.
   adaptation. All deterministic, all in `longrun.analysis`.
 - **v1.2:** LLM weekly narrative, narrating v1.0/v1.1 outputs only.
 
+### Parked: real API calls for the training plan
+
+**Not started, and not to be started without an explicit decision.** The owner
+wants the plan itself generated through proper Claude API calls at some point,
+rather than only narrated. Recorded here so a later session finds it.
+
+Read it as a decision that is owed, not a task that is queued, because it
+runs straight into the design principle below: today nothing about a session
+menu comes from a model. Before any of it is built, settle where the line
+sits. Some options, roughly in order of how much they give away:
+
+1. **Narration only** (the current v1.2 plan). The menu is computed; the model
+   phrases it. Nothing it says can change a number.
+2. **Model proposes, engine validates.** The model may suggest a session, and
+   deterministic code checks it against the block, the backlog cap, the
+   readiness verdict and the sizing rules, rejecting anything that fails.
+   Every figure printed still comes from the engine.
+3. **Model plans directly.** Abandons the principle. Would need the README
+   rewritten rather than quietly contradicted.
+
+Whatever is chosen, these hold: no training paces, distances or readiness
+verdicts invented by a model; every number on screen traceable to code; and
+the whole feature working offline, since a plan that needs a network call and
+an API key is worse than the one that exists now. Option 2 looks like the one
+worth costing first.
+
 Rules the plan engine must keep:
 
 - **Never reproduce a copyrighted table.** VDOT comes from the Daniels and
