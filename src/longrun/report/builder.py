@@ -185,29 +185,48 @@ _PHASE_NOTES: tuple[tuple[Phase, str, str], ...] = (
     (
         Phase.MENSTRUAL,
         "Menstrual",
-        "Oestrogen and progesterone are both at their lowest. Iron losses "
-        "over the period are the one thing here with a clear performance "
-        "consequence, and only if they are heavy enough to matter.",
+        "Both hormones at their lowest. <strong>Resting heart rate</strong> "
+        "and core temperature are usually at their lowest for the cycle and "
+        "<strong>HRV</strong> at its highest, so a readiness score can read "
+        "green on a day that feels anything but. <strong>Weight</strong> "
+        "drops back as the previous phase's fluid goes. Blood lost over a "
+        "heavy period is the one thing here with a well-evidenced effect on "
+        "<strong>aerobic capacity</strong>, and it works through iron stores "
+        "over months rather than day to day.",
     ),
     (
         Phase.FOLLICULAR,
         "Follicular",
-        "Oestrogen climbs towards its mid-cycle peak. Body temperature and "
-        "resting heart rate typically sit at their lowest for the cycle.",
+        "Oestrogen climbs towards its mid-cycle peak. Resting heart rate and "
+        "temperature stay low and <strong>weight</strong> is at its most "
+        "stable, which makes this the cleanest stretch for comparing one "
+        "reading against another. Often described as the best phase for hard "
+        "sessions and <strong>strength</strong> work; the trial evidence for "
+        "that is thin and inconsistent, so treat it as a hypothesis to check "
+        "against your own points rather than a rule.",
     ),
     (
         Phase.OVULATION,
         "Ovulation",
-        "Oestrogen peaks and falls away; a small sustained rise in body "
-        "temperature follows and is what marks the phase change.",
+        "Oestrogen peaks and drops away, and the sustained temperature rise "
+        "that follows is what actually marks the boundary. Some studies find "
+        "a small peak in maximal <strong>strength</strong> around here; "
+        "others find nothing. Nothing about it is visible in the metrics on "
+        "this page, which is why the band is inferred rather than observed.",
     ),
     (
         Phase.LUTEAL,
         "Luteal",
-        "Progesterone rises. Core temperature runs a few tenths higher, "
-        "resting heart rate tends to sit slightly higher and HRV slightly "
-        "lower, and heat is harder to lose &mdash; so the same effort can "
-        "feel warmer without being harder.",
+        "Progesterone rises and the picture shifts. Core temperature runs a "
+        "few tenths higher, <strong>resting heart rate</strong> a little "
+        "higher and <strong>HRV</strong> a little lower &mdash; enough to "
+        "move a readiness verdict with nothing wrong. <strong>Weight</strong> "
+        "can rise a kilo or more on fluid, not tissue. Heat is harder to "
+        "shed, so <strong>aerobic</strong> work at a fixed pace costs more "
+        "in warm conditions. That matters for the "
+        "<strong>VO<sub>2</sub>max</strong> panel above: a watch infers the "
+        "number from heart rate at a given pace, so a luteal heart-rate lift "
+        "can push the estimate down while aerobic capacity is unchanged.",
     ),
 )
 """General physiology, in the order the phases occur.
@@ -215,6 +234,11 @@ _PHASE_NOTES: tuple[tuple[Phase, str, str], ...] = (
 Deliberately about the phases rather than about the athlete: this text is
 fixed, and describing what the chart appears to show would be an
 interpretation of a handful of cycles dressed up as a finding.
+
+Each note is anchored to a measure the panel actually plots, so the key
+explains what to look at rather than reading as a health leaflet. Where the
+evidence is weak - most of the performance claims - it says so, because a
+confident sentence here would be the most misleading thing on the page.
 """
 
 
