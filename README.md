@@ -363,6 +363,18 @@ undone rolls over — up to a cap, because a fortnight of illness should not
 become a fortnight of debt. Readiness attaches a note to hard sessions; it
 never removes them. Easy runs are never carried forward.
 
+**Session lengths are read off recent running, not off a percentage.** The
+usual rule — a long run is 25–30% of weekly volume — falls apart at low
+mileage, where it prescribes a "long run" shorter than every run actually
+done. So an easy run is the median of the last eight weeks of running, and a
+long run goes just past the longest of them, with a floor keeping the two
+recognisably different sessions. A quality session is sized around its reps
+plus a warm-up and cool-down. Easy and long runs also carry a time, since
+that is how they are really judged; rep sessions do not, since a total time
+for one would only mislead. Under four recent runs nothing is suggested,
+which is the honest answer for someone starting out. Rides and gym sessions
+are excluded, so a long ride cannot inflate a run.
+
 **Adaptation suggests, it does not adjust.** Running quicker than prescribed
 *at a lower heart rate* across several sessions means the anchor looks stale,
 so it suggests a re-test. A VDOT that crept upward on its own would eventually

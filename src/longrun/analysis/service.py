@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from longrun.analysis.anchor import ANCHOR_WINDOW_DAYS, DetectedEffort, hard_effort_threshold
+from longrun.analysis.plan import SIZING_WINDOW_WEEKS
 from longrun.analysis.readiness import DailyReading
 from longrun.analysis.splits import best_split
 from longrun.models import is_running_sport
@@ -123,6 +124,39 @@ def detect_five_k_efforts(
             )
         )
     return efforts
+
+
+def recent_run_distances(
+    store: Store, today: dt.date, weeks: int = SIZING_WINDOW_WEEKS
+) -> list[float]:
+    """Return the distances of recent runs, in kilometres.
+
+    Only running counts: a ride's distance says nothing about how far a run
+    should be. An activity with no distance upstream is stored as zero, and
+    a zero is dropped rather than dragging the median down.
+
+    Args:
+        store: An initialised store.
+        today: The day the plan is being built for.
+        weeks: How far back to look.
+
+    Returns:
+        Distances in kilometres, oldest first.
+    """
+    since = today - dt.timedelta(weeks=weeks)
+    rows = store.conn.execute(
+        "SELECT sport_type, distance_m FROM activities WHERE start_time >= ? ORDER BY start_time",
+        (since.isoformat(),),
+    ).fetchall()
+
+    distances: list[float] = []
+    for row in rows:
+        if not is_running_sport(row["sport_type"]):
+            continue
+        metres = _optional(row["distance_m"])
+        if metres:
+            distances.append(metres / 1000.0)
+    return distances
 
 
 def completed_session_names(store: Store, week_start: dt.date) -> list[str]:

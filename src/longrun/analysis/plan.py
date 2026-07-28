@@ -23,8 +23,9 @@ Everything is a rule with a number, testable against fixed inputs.
 
 import datetime as dt
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from statistics import median
 
 from longrun.analysis.goals import Emphasis, Goals
 from longrun.analysis.vdot import Zone
@@ -68,32 +69,46 @@ class Session:
         family: Which family it belongs to.
         zone: The pace zone its hard portion is run at.
         description: What to actually do.
+        work_km: Roughly how far the hard portion covers, for sizing the
+            session as a whole. Nominal, since a time-based rep covers
+            different ground at different fitness; it is only ever used to
+            suggest a total, never to prescribe one.
     """
 
     name: str
     family: Family
     zone: Zone
     description: str
+    work_km: float = 0.0
 
 
 # Several shapes per family, so a block rotates through them rather than
 # repeating one session until it is stale.
 SESSION_LIBRARY: tuple[Session, ...] = (
-    Session("5x1000", Family.THRESHOLD, Zone.THRESHOLD, "5 x 1000m at threshold, 90s jog"),
-    Session("4x4min", Family.THRESHOLD, Zone.THRESHOLD, "4 x 4 minutes at threshold, 2min jog"),
-    Session("2x15min", Family.THRESHOLD, Zone.THRESHOLD, "2 x 15 minutes at threshold, 3min jog"),
-    Session("20min tempo", Family.THRESHOLD, Zone.THRESHOLD, "20 minutes continuous at threshold"),
-    Session("6x800", Family.VO2MAX, Zone.INTERVAL, "6 x 800m at interval pace, 2min jog"),
-    Session("5x3min", Family.VO2MAX, Zone.INTERVAL, "5 x 3 minutes at interval pace, 2min jog"),
-    Session("30/30s", Family.VO2MAX, Zone.INTERVAL, "12 x 30s hard / 30s easy, continuous"),
-    Session("8x400", Family.VO2MAX, Zone.REPETITION, "8 x 400m at repetition pace, 90s jog"),
-    Session("hill reps", Family.HILLS, Zone.INTERVAL, "8 x 45s uphill hard, jog down"),
-    Session("long hills", Family.HILLS, Zone.THRESHOLD, "5 x 2min uphill steady, jog down"),
+    Session("5x1000", Family.THRESHOLD, Zone.THRESHOLD, "5 x 1000m at threshold, 90s jog", 5.0),
+    Session(
+        "4x4min", Family.THRESHOLD, Zone.THRESHOLD, "4 x 4 minutes at threshold, 2min jog", 2.6
+    ),
+    Session(
+        "2x15min", Family.THRESHOLD, Zone.THRESHOLD, "2 x 15 minutes at threshold, 3min jog", 4.9
+    ),
+    Session(
+        "20min tempo", Family.THRESHOLD, Zone.THRESHOLD, "20 minutes continuous at threshold", 3.3
+    ),
+    Session("6x800", Family.VO2MAX, Zone.INTERVAL, "6 x 800m at interval pace, 2min jog", 4.8),
+    Session(
+        "5x3min", Family.VO2MAX, Zone.INTERVAL, "5 x 3 minutes at interval pace, 2min jog", 2.7
+    ),
+    Session("30/30s", Family.VO2MAX, Zone.INTERVAL, "12 x 30s hard / 30s easy, continuous", 2.2),
+    Session("8x400", Family.VO2MAX, Zone.REPETITION, "8 x 400m at repetition pace, 90s jog", 3.2),
+    Session("hill reps", Family.HILLS, Zone.INTERVAL, "8 x 45s uphill hard, jog down", 1.8),
+    Session("long hills", Family.HILLS, Zone.THRESHOLD, "5 x 2min uphill steady, jog down", 3.0),
     Session(
         "strides",
         Family.STRIDES,
         Zone.REPETITION,
         "6 x 20s relaxed and fast after an easy run",
+        0.6,
     ),
     Session("long run", Family.LONG, Zone.EASY, "Long run, conversational throughout"),
     Session("easy run", Family.EASY, Zone.EASY, "Easy run, conversational throughout"),
@@ -108,6 +123,93 @@ _BLOCK_FAMILIES: dict[Emphasis, tuple[Family, ...]] = {
 }
 
 
+LONG_RUN_GROWTH = 1.05
+"""How far a long run may exceed the longest run actually done recently.
+
+Five per cent a week compounds quickly enough to build and slowly enough
+that nothing snaps. Suggesting a distance far beyond anything recent is how
+a plan gets ignored, or gets followed and causes an injury.
+"""
+
+LONG_RUN_MIN_RATIO = 1.4
+"""A long run has to be meaningfully longer than an easy one to be one."""
+
+QUALITY_SUPPORT_KM = 2.5
+"""Warm-up and cool-down around the hard part of a session."""
+
+MIN_RUNS_FOR_SIZING = 4
+"""Runs needed before a distance suggestion is worth making."""
+
+SIZING_WINDOW_WEEKS = 8
+"""How far back to look when sizing sessions.
+
+Long enough to survive a quiet fortnight, short enough that the suggestion
+follows current form rather than last season's.
+"""
+
+
+@dataclass(frozen=True)
+class Sizing:
+    """Suggested distances, calibrated to what is actually being run.
+
+    Sizing a long run as a share of weekly volume is the usual approach and
+    it collapses at low mileage: thirty per cent of a ten-kilometre week is
+    three kilometres, which is not a long run by any reading. These figures
+    come from the distribution of recent runs instead, so they stay
+    recognisable whatever the volume.
+
+    Attributes:
+        easy_km: A typical easy run, the median of recent runs.
+        long_km: A long run, just beyond the longest done recently.
+    """
+
+    easy_km: float
+    long_km: float
+
+
+def size_from_history(distances_km: Sequence[float]) -> Sizing | None:
+    """Derive session distances from recent runs.
+
+    Args:
+        distances_km: Distances of recent runs, in kilometres.
+
+    Returns:
+        The suggested sizes, or None if there is too little history to
+        suggest anything honestly.
+    """
+    usable = sorted(distance for distance in distances_km if distance > 0)
+    if len(usable) < MIN_RUNS_FOR_SIZING:
+        return None
+
+    easy = float(median(usable))
+    # Just past the longest recent run, but never so close to the easy run
+    # that the two stop being different sessions.
+    long_run = max(usable[-1] * LONG_RUN_GROWTH, easy * LONG_RUN_MIN_RATIO)
+    return Sizing(easy_km=round(easy, 1), long_km=round(long_run, 1))
+
+
+def suggested_distance(session: Session, sizing: Sizing | None) -> float | None:
+    """Return how far a session might be, in kilometres.
+
+    Args:
+        session: The session to size.
+        sizing: Distances derived from recent runs, if available.
+
+    Returns:
+        A suggested total distance, or None when there is no basis for one.
+    """
+    if sizing is None:
+        return None
+    if session.family is Family.LONG:
+        return sizing.long_km
+    if session.family is Family.EASY:
+        return sizing.easy_km
+    if session.family is Family.STRIDES:
+        # Strides hang off the end of an easy run rather than replacing it.
+        return round(sizing.easy_km + session.work_km, 1)
+    return round(session.work_km + QUALITY_SUPPORT_KM, 1)
+
+
 @dataclass(frozen=True)
 class PlannedSession:
     """A session on the menu, with why it is there.
@@ -117,12 +219,25 @@ class PlannedSession:
         priority: 1 is the most worthwhile thing this week.
         rolled_over: Whether it is outstanding from a previous week.
         note: Spacing or readiness guidance; never an instruction.
+        distance_km: Roughly how far, sized from recent running.
+        duration_min: Roughly how long at easy pace, where that is the
+            useful way to think about it.
     """
 
     session: Session
     priority: int
     rolled_over: bool = False
     note: str = ""
+    distance_km: float | None = None
+    duration_min: float | None = None
+
+    def size_label(self) -> str:
+        """Return a short description of the suggested size, if there is one."""
+        if self.distance_km is None:
+            return ""
+        if self.duration_min is None:
+            return f"~{self.distance_km:g} km"
+        return f"~{self.distance_km:g} km ({round(self.duration_min)} min)"
 
 
 @dataclass(frozen=True)
@@ -170,6 +285,8 @@ def build_menu(
     week_index: int,
     outstanding: Sequence[Session] = (),
     readiness_note: str = "",
+    sizing: Sizing | None = None,
+    easy_pace_s_per_km: float | None = None,
 ) -> WeeklyMenu:
     """Build the week's menu.
 
@@ -183,6 +300,10 @@ def build_menu(
         week_index: Zero-based week number, for the block rotation.
         outstanding: Sessions not done in previous weeks, oldest first.
         readiness_note: Guidance to attach to the hardest session, if any.
+        sizing: Distances derived from recent running, for suggesting how
+            far each session might be.
+        easy_pace_s_per_km: Easy pace from the current anchor, used to turn
+            an easy or long distance into a time on feet.
 
     Returns:
         The menu, most worthwhile first.
@@ -230,7 +351,21 @@ def build_menu(
         )
         priority += 1
 
-    return WeeklyMenu(week_start=week_start, emphasis=emphasis, sessions=sessions, dropped=dropped)
+    sized = [_with_size(planned, sizing, easy_pace_s_per_km) for planned in sessions]
+    return WeeklyMenu(week_start=week_start, emphasis=emphasis, sessions=sized, dropped=dropped)
+
+
+def _with_size(
+    planned: PlannedSession, sizing: Sizing | None, easy_pace_s_per_km: float | None
+) -> PlannedSession:
+    """Attach a suggested distance, and a duration where time is the point."""
+    distance = suggested_distance(planned.session, sizing)
+    duration = None
+    # Time on feet is how an easy or long run is judged. A rep session is
+    # judged by the reps, and a total time for one would only mislead.
+    if distance is not None and easy_pace_s_per_km and planned.session.zone is Zone.EASY:
+        duration = distance * easy_pace_s_per_km / 60.0
+    return replace(planned, distance_km=distance, duration_min=duration)
 
 
 def outstanding_after(menu: WeeklyMenu, completed_names: Sequence[str]) -> list[Session]:

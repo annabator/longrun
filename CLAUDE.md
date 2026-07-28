@@ -96,6 +96,10 @@ Rules the plan engine must keep:
   weekday, nothing is overdue, and readiness attaches notes rather than
   removing sessions.
 - **Cap the backlog.** Rollover past the cap drops the oldest sessions.
+- **Size sessions from the run distribution, never as a share of weekly
+  volume.** A percentage rule collapses at low mileage - 30% of a 10 km week
+  is a 3 km "long run". Below the minimum run count, suggest nothing rather
+  than inventing a distance.
 - **Never require a subjective rating.** Readiness rests on HRV, resting heart
   rate and sleep. RPE is not used at all, and feel is read only where a watch
   supplied one. Do not add a factor that needs the athlete to type something.

@@ -26,14 +26,16 @@ from longrun.analysis import (
 )
 from longrun.analysis.anchor import Confidence, DetectedEffort, anchor_paces, find_anchor
 from longrun.analysis.goals import Emphasis, load_goals, save_goals
-from longrun.analysis.plan import WeeklyMenu, build_menu, week_start_for
+from longrun.analysis.plan import WeeklyMenu, build_menu, size_from_history, week_start_for
 from longrun.analysis.readiness import Readiness
 from longrun.analysis.readiness import assess as readiness_assess
 from longrun.analysis.service import (
     completed_session_names,
     daily_readings,
     detect_five_k_efforts,
+    recent_run_distances,
 )
+from longrun.analysis.vdot import Zone, pace_zones
 from longrun.config import Settings, load_settings
 from longrun.errors import IngestError, LongrunError
 from longrun.ingest.base import IngestSummary
@@ -579,7 +581,14 @@ def plan_command(
         verdict = readiness_assess(readings, today)
         note = _readiness_note(verdict.readiness)
 
-        menu = build_menu(goals, week_start, _week_index(store, week_start), readiness_note=note)
+        menu = build_menu(
+            goals,
+            week_start,
+            _week_index(store, week_start),
+            readiness_note=note,
+            sizing=size_from_history(recent_run_distances(store, today)),
+            easy_pace_s_per_km=_easy_pace(store, today),
+        )
         done = completed_session_names(store, week_start)
 
         if today_only:
@@ -591,7 +600,8 @@ def plan_command(
         for planned in menu.sessions:
             marker = "x" if planned.session.name.lower() in done else " "
             carried = " (rolled over)" if planned.rolled_over else ""
-            typer.echo(f"  [{marker}] {planned.priority}. {planned.session.name}{carried}")
+            size = f"  {planned.size_label()}" if planned.size_label() else ""
+            typer.echo(f"  [{marker}] {planned.priority}. {planned.session.name}{carried}{size}")
             typer.echo(f"        {planned.session.description}")
             if planned.note:
                 typer.echo(f"        note: {planned.note}")
@@ -714,10 +724,31 @@ def _echo_next_session(menu: WeeklyMenu, done: list[str]) -> None:
         if planned.session.name.lower() in done:
             continue
         typer.echo(f"{planned.session.name}: {planned.session.description}")
+        if planned.size_label():
+            typer.echo(f"about {planned.size_label().lstrip('~')}")
         if planned.note:
             typer.echo(f"note: {planned.note}")
         return
     typer.echo("Everything on this week's menu is done. Anything else is a bonus.")
+
+
+def _easy_pace(store: Store, today: dt.date) -> float | None:
+    """Return easy pace in seconds per kilometre, if paces can be anchored.
+
+    Args:
+        store: An initialised store.
+        today: The day the plan is being built for.
+
+    Returns:
+        Seconds per kilometre, or None when there is nothing to anchor on.
+    """
+    found = find_anchor(load_tests(store.conn), today, detected=detect_five_k_efforts(store, today))
+    if found is None:
+        return None
+    for zone in pace_zones(found.vdot):
+        if zone.zone is Zone.EASY:
+            return zone.seconds_per_km
+    return None
 
 
 def _load_cycles(settings: Settings) -> list[Cycle]:
