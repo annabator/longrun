@@ -15,14 +15,13 @@ Nothing here computes a statistic. Figures are drawn from series prepared in
 
 import datetime as dt
 from collections.abc import Sequence
-from statistics import median
 from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from longrun.analysis.cycle import Cycle, median_cycle_length, ovulation_estimate
+from longrun.analysis.cycle import Phase, PhaseSpan, typical_phase_spans
 from longrun.models import Metric
 from longrun.report import frames
 from longrun.report.theme import (
@@ -31,9 +30,12 @@ from longrun.report.theme import (
     LINE_WIDTH,
     MARKER_SIZE,
     PB_MARKER_SIZE,
+    RAW_LINE_WIDTH,
     ROLE_ACCENT,
     ROLE_RAW,
     ROLE_SERIES,
+    SPARSE_LINE_DASH,
+    Palette,
 )
 
 _PANEL_HEIGHT_PX = 190
@@ -165,9 +167,11 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     the interesting thing; the spread at a given cycle day is.
 
     Markers rather than joined lines, because these readings are days apart
-    and a line between them would draw values that were never measured. The
-    menstrual span is shaded and the median ovulation estimate marked, both
-    softly: those boundaries are estimates, not events.
+    and a line between them would draw values that were never measured.
+
+    Each phase is shaded, in the order the phases occur. The boundaries are
+    medians across the logged cycles rather than events, so the bands are
+    drawn softly and no single cycle is obliged to match them.
 
     Args:
         data: Loaded report frames, including derived cycles.
@@ -178,20 +182,23 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     panels = (
         ("HRV rMSSD (ms)", data.wellness, "date", "hrv_rmssd"),
         ("Resting heart rate (bpm)", data.wellness, "date", "resting_hr"),
-        # Feel rather than RPE: a watch fills this in on its own, where RPE
-        # only exists if someone types it, and an empty panel says nothing.
-        ("Session feel (higher is better)", data.activities, "start_time", "feel"),
+        ("Weight (kg)", data.wellness, "date", "weight_kg"),
+        (
+            "VO<sub>2</sub>max (ml/kg/min)",
+            frames.metric_series(data.tests, Metric.VO2MAX),
+            "date",
+            "value",
+        ),
     )
     figure = make_subplots(
         rows=len(panels),
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
+        vertical_spacing=0.07,
         subplot_titles=tuple(title for title, *_ in panels),
     )
 
-    median_period = _median_period_days(data.cycles)
-    median_ovulation = _median_ovulation_day(data.cycles)
+    spans = typical_phase_spans(data.cycles)
     latest_start = data.cycles[-1].start if data.cycles else None
 
     for row, (_, frame, date_column, value_column) in enumerate(panels, start=1):
@@ -204,7 +211,7 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
         # bands still sit behind the points, which is a layer setting rather
         # than a question of insertion order.
         _add_cycle_scatter(figure, placed, row=row, latest_start=latest_start)
-        _shade_cycle_phases(figure, row, median_period, median_ovulation)
+        _shade_cycle_phases(figure, row, spans)
 
     figure.update_layout(
         height=_PANEL_HEIGHT_PX * len(panels) + 60,
@@ -216,6 +223,34 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     # No date window here: this figure's x-axis is cycle day, not the calendar.
     _apply_base_layout(figure)
     return figure
+
+
+PHASE_ORDER: tuple[Phase, ...] = (
+    Phase.MENSTRUAL,
+    Phase.FOLLICULAR,
+    Phase.OVULATION,
+    Phase.LUTEAL,
+)
+"""The phases in the order they occur, which fixes their colours.
+
+Colour follows the phase, never its position in whatever spans happened to be
+derivable, so a cycle too short to have a follicular band does not repaint the
+other three.
+"""
+
+
+def phase_colour(phase: Phase, palette: Palette = LIGHT) -> str:
+    """Return the band colour for one phase.
+
+    Args:
+        phase: The phase to colour.
+        palette: The palette to read from; defaults to the light one.
+
+    Returns:
+        A hex colour, falling back to the menstrual shade for an unknown phase.
+    """
+    index = PHASE_ORDER.index(phase) if phase in PHASE_ORDER else 0
+    return palette.phases[index]
 
 
 def _add_cycle_scatter(
@@ -256,59 +291,30 @@ def _add_cycle_scatter(
         )
 
 
-def _shade_cycle_phases(
-    figure: go.Figure, row: int, median_period: int | None, median_ovulation: int | None
-) -> None:
-    """Mark the median menstrual span and ovulation estimate.
+def _shade_cycle_phases(figure: go.Figure, row: int, spans: Sequence[PhaseSpan]) -> None:
+    """Shade each phase behind the points.
 
-    Visible enough to read but deliberately recessive, and labelled only on
-    the first panel: these are medians across cycles, so they describe where
-    the boundaries usually fall rather than where they fell in any one cycle.
+    The bands are unlabelled in the plot: in-plot labels collided with the
+    subplot titles and with each other, and the key beside the figure has room
+    to say what each phase is, which a four-character label does not.
+
+    Each shape is named for its phase so the page's theme script can recolour
+    it without depending on the order shapes happen to have been added in.
     """
-    # Left unlabelled on purpose. In-plot labels collided with the subplot
-    # titles and with each other, and the caption above the figure already
-    # says what the band and the line are - which is the right place for a
-    # caveat this long anyway.
-    if median_period:
+    for span in spans:
         figure.add_vrect(
-            x0=0.5,
-            x1=median_period + 0.5,
-            fillcolor=LIGHT.axis,
-            opacity=0.28,
+            # Half-day margins, so a band covers its whole day rather than
+            # stopping at the point that sits on the boundary.
+            x0=span.first_day - 0.5,
+            x1=span.last_day + 0.5,
+            name=f"phase:{PHASE_ORDER.index(span.phase)}",
+            fillcolor=phase_colour(span.phase),
+            opacity=0.55,
             line_width=0,
             layer="below",
             row=row,
             col=1,
         )
-    if median_ovulation:
-        figure.add_vline(
-            x=median_ovulation,
-            line_width=1.5,
-            line_dash="dash",
-            line_color=LIGHT.ink_muted,
-            row=row,
-            col=1,
-        )
-
-
-def _median_period_days(cycles: Sequence[Cycle]) -> int | None:
-    """Return the median span of the logged periods, in days."""
-    if not cycles:
-        return None
-    return int(median(cycle.period_days for cycle in cycles))
-
-
-def _median_ovulation_day(cycles: Sequence[Cycle]) -> int | None:
-    """Return the median estimated ovulation day across completed cycles."""
-    median_length = median_cycle_length(cycles)
-    days: list[int] = []
-    for cycle in cycles:
-        if not cycle.is_complete:
-            continue
-        estimate = ovulation_estimate(cycle, median_length)
-        if estimate is not None:
-            days.append((estimate - cycle.start).days + 1)
-    return int(median(days)) if days else None
 
 
 def build_load_context_figure(
@@ -456,8 +462,8 @@ def _add_daily_with_baseline(
         y=series[value_column],
         name="Daily reading",
         mode="lines",
-        line={"color": LIGHT.raw, "width": 1},
-        opacity=0.55,
+        line={"color": LIGHT.raw, "width": RAW_LINE_WIDTH},
+        opacity=0.45,
         meta={"role": ROLE_RAW},
         hovertemplate=f"%{{y:.0f}} {unit}<extra></extra>",
         legend=legend,
@@ -499,7 +505,7 @@ def _add_sparse_series(
         y=series["value"],
         name=name,
         mode="lines+markers",
-        line={"color": LIGHT.series, "width": LINE_WIDTH},
+        line={"color": LIGHT.series, "width": LINE_WIDTH, "dash": SPARSE_LINE_DASH},
         marker={"size": MARKER_SIZE, "color": LIGHT.series},
         meta={"role": ROLE_SERIES},
         showlegend=False,
@@ -521,7 +527,7 @@ def _add_parkrun_series(figure: go.Figure, parkrun: pd.DataFrame, *, row: int) -
         y=parkrun["value"],
         name="parkrun result",
         mode="lines+markers",
-        line={"color": LIGHT.series, "width": LINE_WIDTH},
+        line={"color": LIGHT.series, "width": LINE_WIDTH, "dash": SPARSE_LINE_DASH},
         marker={"size": MARKER_SIZE, "symbol": "circle", "color": LIGHT.series},
         meta={"role": ROLE_SERIES},
         customdata=labels,
@@ -545,7 +551,7 @@ def _add_parkrun_series(figure: go.Figure, parkrun: pd.DataFrame, *, row: int) -
             "size": PB_MARKER_SIZE,
             "symbol": "diamond",
             "color": LIGHT.accent,
-            "line": {"width": 2, "color": LIGHT.surface},
+            "line": {"width": 1.5, "color": LIGHT.surface},
         },
         meta={"role": ROLE_ACCENT},
         customdata=[frames.format_duration(value) for value in bests["value"]],
@@ -567,8 +573,8 @@ def _add_resting_hr_series(figure: go.Figure, resting: pd.DataFrame, *, row: int
         y=resting["resting_hr"],
         name="Daily reading",
         mode="lines",
-        line={"color": LIGHT.raw, "width": 1},
-        opacity=0.55,
+        line={"color": LIGHT.raw, "width": RAW_LINE_WIDTH},
+        opacity=0.45,
         meta={"role": ROLE_RAW},
         hovertemplate="%{y:.0f} bpm<extra></extra>",
         legend="legend3",

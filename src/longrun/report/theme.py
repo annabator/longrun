@@ -2,8 +2,18 @@
 
 Both modes are chosen rather than derived: the dark values are their own
 steps against the dark surface, not an inversion of the light ones. Every
-colour used to draw data was checked against the light and dark surfaces for
-contrast and colour-vision separation before being adopted.
+colour used to draw data was run through a colour-vision check against the
+light and dark surfaces before being adopted, for the pairs that actually
+share a panel:
+
+* series against accent, which meet in the parkrun panel;
+* series against raw, which meet wherever a daily reading sits behind its
+  baseline.
+
+The one pair that lands in the marginal band is series against raw under
+tritanopia. It stays, because those two never rely on colour alone: the raw
+series is a thin translucent line behind a solid one twice its weight, and
+both are named in the panel's own legend.
 
 Colour deliberately carries no identity in the trend view. Each panel holds a
 single series and is named by its own title, so the panels share one hue and
@@ -14,9 +24,26 @@ from dataclasses import dataclass
 
 FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
-LINE_WIDTH = 2
-MARKER_SIZE = 8
-PB_MARKER_SIZE = 11
+LINE_WIDTH = 1.5
+"""Weight of a plotted line. Thin, so the shape reads before the ink does."""
+
+RAW_LINE_WIDTH = 1
+"""Weight of an unsmoothed daily series shown behind its baseline."""
+
+MARKER_SIZE = 5
+"""Small. These charts are about the trend; a point's exact value is a hover
+away, and large markers turn a sparse series into a row of beads."""
+
+PB_MARKER_SIZE = 9
+"""Personal bests are the exception: they are meant to be found at a glance."""
+
+SPARSE_LINE_DASH = "dot"
+"""Sparse series are joined with a dotted line.
+
+Weight and VO2max are measured days or weeks apart, so the line between two
+readings is drawn, not observed. Dotting it says so while still carrying the
+eye along the trend, which a bare scatter of points does not.
+"""
 
 
 @dataclass(frozen=True)
@@ -28,6 +55,7 @@ class Palette:
         accent: Reserved for personal bests, always paired with a distinct
             marker shape and a label so the colour never carries meaning alone.
         raw: Recessive ink for an unsmoothed series shown behind its average.
+        phases: Cycle phase bands, in the order the phases occur.
     """
 
     surface: str
@@ -38,9 +66,9 @@ class Palette:
     grid: str
     axis: str
     series: str
-    series_alt: str
     accent: str
     raw: str
+    phases: tuple[str, str, str, str]
 
 
 LIGHT = Palette(
@@ -51,10 +79,10 @@ LIGHT = Palette(
     ink_muted="#898781",
     grid="#e1e0d9",
     axis="#c3c2b7",
-    series="#2a78d6",
-    series_alt="#eb6834",
-    accent="#0ca30c",
-    raw="#898781",
+    series="#7c6bd4",
+    accent="#e0559b",
+    raw="#a39086",
+    phases=("#e492b8", "#fbe7f1", "#f0a9cb", "#f4c6da"),
 )
 
 DARK = Palette(
@@ -65,13 +93,12 @@ DARK = Palette(
     ink_muted="#898781",
     grid="#2c2c2a",
     axis="#383835",
-    series="#3987e5",
-    series_alt="#d95926",
-    accent="#0ca30c",
-    raw="#898781",
+    series="#8f7fe0",
+    accent="#dd5590",
+    raw="#a89078",
+    phases=("#8c3a60", "#2e1e26", "#6f3450", "#4e2b39"),
 )
 
 ROLE_SERIES = "series"
-ROLE_SERIES_ALT = "series_alt"
 ROLE_RAW = "raw"
 ROLE_ACCENT = "accent"
