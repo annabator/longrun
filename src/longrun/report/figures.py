@@ -181,6 +181,12 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     medians across the logged cycles rather than events, so the bands are
     drawn softly and no single cycle is obliged to match them.
 
+    Every panel says how many cycles it was built from. A reading only lands
+    here if a logged cycle covers the day it was taken, and the four measures
+    start at different times, so one panel can rest on nine cycles while the
+    one below it rests on four. Left unstated, a sparse panel looks like
+    missing cycles rather than a metric the watch only began reporting later.
+
     Args:
         data: Loaded report frames, including derived cycles.
 
@@ -198,19 +204,26 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
             "value",
         ),
     )
+    # Placed first, so each panel's title can carry its own cycle count.
+    placements = [
+        frames.by_cycle_day(frame, date_column, value_column, data.cycles)
+        for _, frame, date_column, value_column in panels
+    ]
     figure = make_subplots(
         rows=len(panels),
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.07,
-        subplot_titles=tuple(title for title, *_ in panels),
+        subplot_titles=tuple(
+            _panel_title(title, placed)
+            for (title, *_), placed in zip(panels, placements, strict=True)
+        ),
     )
 
     spans = typical_phase_spans(data.cycles)
     latest_start = data.cycles[-1].start if data.cycles else None
 
-    for row, (_, frame, date_column, value_column) in enumerate(panels, start=1):
-        placed = frames.by_cycle_day(frame, date_column, value_column, data.cycles)
+    for row, placed in enumerate(placements, start=1):
         if placed.empty:
             _annotate_empty(figure, row=row)
             continue
@@ -231,6 +244,14 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     # No date window here: this figure's x-axis is cycle day, not the calendar.
     _apply_base_layout(figure)
     return figure
+
+
+def _panel_title(title: str, placed: pd.DataFrame) -> str:
+    """Append the number of cycles a panel actually rests on."""
+    if placed.empty:
+        return title
+    cycles = int(placed["cycle_start"].nunique())
+    return f"{title} &nbsp;·&nbsp; {cycles} cycle{'s' if cycles != 1 else ''}"
 
 
 PHASE_ORDER: tuple[Phase, ...] = (

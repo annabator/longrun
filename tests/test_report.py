@@ -476,3 +476,33 @@ def test_the_wellness_panel_never_widens_a_window_it_was_given(seeded_store: Sto
     figure = build_wellness_figure(data, narrow)
 
     assert dt.date.fromisoformat(str(figure.layout.xaxis.range[0])) == narrow[0]
+
+
+def test_each_cycle_panel_says_how_many_cycles_it_rests_on(seeded_store: Store) -> None:
+    """A sparse panel must not read as missing cycles."""
+    cycles = cycles_from_days(FAKE_CYCLE_LOG)
+    data = load_report_data(seeded_store, cycles)
+
+    figure = build_cycle_figure(data)
+
+    titles = [str(annotation.text) for annotation in figure.layout.annotations]
+    counted = [title for title in titles if "cycle" in title]
+    assert len(counted) == 4
+    for title in counted:
+        shown = int(re.search(r"(\d+) cycles?", title).group(1))  # type: ignore[union-attr]
+        assert 1 <= shown <= len(cycles)
+
+
+def test_a_panel_counts_only_the_cycles_that_carry_its_measure(seeded_store: Store) -> None:
+    """Weight starts earlier than HRV here, so it should rest on more cycles."""
+    data = load_report_data(seeded_store, cycles_from_days(FAKE_CYCLE_LOG))
+
+    figure = build_cycle_figure(data)
+
+    counts = {
+        str(annotation.text).split(" &nbsp;")[0]: int(found.group(1))
+        for annotation in figure.layout.annotations
+        if (found := re.search(r"(\d+) cycles?", str(annotation.text)))
+    }
+    placed = by_cycle_day(data.wellness, "date", "hrv_rmssd", cycles_from_days(FAKE_CYCLE_LOG))
+    assert counts["HRV rMSSD (ms)"] == placed["cycle_start"].nunique()

@@ -451,7 +451,11 @@ This is the most sensitive data here, and it is isolated accordingly:
 
 The panel places HRV, resting heart rate, weight and VO₂max on the cycle day
 each reading fell on, with every cycle overlaid and the phases shaded behind
-them. The bands are medians across the logged cycles — where the boundaries
+them. Each panel says how many cycles it rests on, because the four measures
+start at different times – weight may cover every cycle logged while HRV
+covers only the ones since the watch began syncing it. A reading from before
+the earliest logged period has no cycle day at all and is left out rather
+than guessed at; logging an earlier period brings it in. The bands are medians across the logged cycles — where the boundaries
 usually fall, not where they fell in any one — and a key beside the chart says
 what each phase is physiologically. That text is fixed textbook material, not
 a reading of the chart: whether any of it shows up in a handful of cycles is

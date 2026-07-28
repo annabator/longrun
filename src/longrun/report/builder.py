@@ -153,6 +153,8 @@ def _cycle_section(data: frames.ReportData) -> str:
     if not data.cycles:
         return ""
     figure = _figure_div(figures.build_cycle_figure(data), "cycle")
+    logged = len(data.cycles)
+    earliest = data.cycles[0].start
     return f"""  <section class="private">
     <h2>By cycle day <span class="badge">private</span></h2>
     <p class="note">
@@ -164,6 +166,13 @@ def _cycle_section(data: frames.ReportData) -> str:
       Points only, since readings days apart say nothing about the days
       between, and no averages or tests of difference are computed over what
       is a handful of cycles.
+    </p>
+    <p class="note">
+      {logged} cycle{"s" if logged != 1 else ""} logged, the earliest starting
+      {earliest:%-d %B %Y}. Each panel says how many of them it rests on, which
+      is fewer where the measure started later. A reading from before
+      {earliest:%-d %B %Y} has no cycle day to be placed on and is left out
+      rather than guessed at &mdash; logging an earlier period brings it in.
     </p>
     {figure}
 {_phase_key()}
