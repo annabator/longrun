@@ -87,6 +87,17 @@ _DDL: tuple[str, ...] = (
         notes           TEXT
     )
     """,
+    # Readings the athlete has judged wrong, suppressed on read rather than
+    # deleted: the next sync would fetch a deleted row again, and the stored
+    # value is worth keeping alongside the reason it is not being shown.
+    """
+    CREATE TABLE IF NOT EXISTS wellness_exclusions (
+        date   TEXT NOT NULL,
+        field  TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        PRIMARY KEY (date, field)
+    )
+    """,
     # Long format: one row per (date, metric, source). Holds VO2max, parkrun
     # 5k times, blood results, body composition and anything added in future.
     """

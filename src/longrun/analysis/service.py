@@ -16,6 +16,7 @@ from longrun.analysis.readiness import DailyReading
 from longrun.analysis.splits import best_split
 from longrun.models import is_running_sport
 from longrun.store import Store
+from longrun.store.exclusions import apply_exclusions
 
 
 def daily_readings(store: Store, since: dt.date) -> list[DailyReading]:
@@ -39,6 +40,7 @@ def daily_readings(store: Store, since: dt.date) -> list[DailyReading]:
     )
     if wellness.empty:
         return []
+    wellness = apply_exclusions(store.conn, wellness)
 
     sessions = pd.read_sql_query(
         "SELECT start_time, feel FROM activities WHERE start_time >= ?",
