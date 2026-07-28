@@ -43,6 +43,110 @@ TEST_COLUMNS = ("date", "metric", "value", "unit", "source", "notes")
 """Recognised columns for a tests CSV; `notes` and `source` are optional."""
 
 
+WELLNESS_METRIC_FIELDS: Mapping[str, str] = {
+    "weight": "weight_kg",
+    "weight_kg": "weight_kg",
+    "resting_hr": "resting_hr",
+    "avg_sleeping_hr": "avg_sleeping_hr",
+    "hrv": "hrv_rmssd",
+    "hrv_rmssd": "hrv_rmssd",
+    "sleep_hours": "sleep_hours",
+    "sleep_score": "sleep_score",
+    "spo2": "spo2",
+}
+"""Metric names that belong on a wellness day rather than in `tests`.
+
+One reading per day of something the body is doing continuously. Anything
+else - a race result, a blood test, a VO2max estimate - is a point-in-time
+measurement and goes to the long-format table instead.
+"""
+
+DEFAULT_UNITS: Mapping[str, str] = {
+    "vo2max": "ml/kg/min",
+    "ferritin": "ug/L",
+    "vitamin_d": "nmol/L",
+    "haemoglobin": "g/dL",
+    "body_fat_pct": "%",
+}
+"""Units assumed for well-known metrics, so a unit need not be typed."""
+
+
+def is_wellness_metric(metric: str) -> bool:
+    """Return whether a metric belongs in `wellness_daily`.
+
+    Args:
+        metric: The metric name, in any case.
+
+    Returns:
+        True for a daily wellness field.
+    """
+    return metric.strip().lower() in WELLNESS_METRIC_FIELDS
+
+
+def wellness_entry(metric: str, raw_value: str, day: dt.date, source: str) -> WellnessDay:
+    """Build a wellness day carrying one logged reading.
+
+    Every other field is left absent, so the store merges this into whatever
+    that day already holds rather than replacing it.
+
+    Args:
+        metric: A name from :data:`WELLNESS_METRIC_FIELDS`.
+        raw_value: The value as typed.
+        day: The date it applies to.
+        source: Where it came from.
+
+    Returns:
+        A wellness day with exactly one field populated.
+
+    Raises:
+        IngestError: If the value is not a number.
+    """
+    field = WELLNESS_METRIC_FIELDS[metric.strip().lower()]
+    try:
+        value = float(raw_value.strip())
+    except ValueError as exc:
+        msg = f"{raw_value!r} is not a number"
+        raise IngestError(msg) from exc
+    fields: dict[str, object] = {"date": day, "source": source, field: value}
+    return WellnessDay.model_validate(fields)
+
+
+def measurement_entry(
+    metric: str,
+    raw_value: str,
+    day: dt.date,
+    unit: str,
+    source: str,
+    note: str | None,
+) -> TestResult:
+    """Build a long-format measurement from one logged reading.
+
+    Args:
+        metric: The metric name.
+        raw_value: The value as typed; a duration such as `29:25` is accepted.
+        day: The date it applies to.
+        unit: The unit, or empty to use a known default.
+        source: Where it came from.
+        note: Optional free text.
+
+    Returns:
+        The measurement.
+
+    Raises:
+        IngestError: If the value or unit cannot be resolved.
+    """
+    name = metric.strip().lower()
+    resolved_unit = unit.strip() or DEFAULT_UNITS.get(name, "")
+    try:
+        value, final_unit = parse_measurement(raw_value, resolved_unit)
+    except ValueError as exc:
+        msg = f"Could not log {metric}: {exc}"
+        raise IngestError(msg) from exc
+    return TestResult(
+        date=day, metric=name, value=value, unit=final_unit, source=source, notes=note
+    )
+
+
 def load_wellness_csv(path: Path) -> list[WellnessDay]:
     """Read a wellness CSV into domain models.
 
@@ -153,36 +257,74 @@ def _rows(path: Path, required: set[str]) -> Iterator[tuple[int, Mapping[str, st
         raise IngestError(msg) from exc
 
 
-def _parse_measurement(row: Mapping[str, str], path: Path, line_no: int) -> tuple[float, str]:
-    """Return the numeric value and unit for a tests row."""
-    raw_value = _clean(row.get("value"))
-    unit = _clean(row.get("unit"))
-    if ":" in raw_value:
-        return _parse_duration(raw_value, path, line_no), "s"
-    value = _parse_optional_number(raw_value, path, line_no)
-    if value is None:
-        raise _row_error(path, line_no, "value is required but blank")
-    if not unit:
-        raise _row_error(path, line_no, "unit is required unless value is a duration")
-    return value, unit
+def parse_measurement(raw_value: str, unit: str) -> tuple[float, str]:
+    """Return the numeric value and unit for a measurement.
+
+    Shared by the CSV loader and by `longrun log`, so a duration written as
+    `29:25` means the same thing however it is entered.
+
+    Args:
+        raw_value: The value as written.
+        unit: The unit as written, which may be empty for a duration.
+
+    Returns:
+        A `(value, unit)` pair, durations converted to seconds.
+
+    Raises:
+        ValueError: If the value is blank, unparseable, or has no unit.
+    """
+    value_text = raw_value.strip()
+    unit_text = unit.strip()
+    if ":" in value_text:
+        return parse_duration(value_text), "s"
+    if not value_text:
+        msg = "value is required but blank"
+        raise ValueError(msg)
+    try:
+        value = float(value_text)
+    except ValueError as exc:
+        msg = f"{value_text!r} is not a number"
+        raise ValueError(msg) from exc
+    if not unit_text:
+        msg = "unit is required unless the value is a duration"
+        raise ValueError(msg)
+    return value, unit_text
 
 
-def _parse_duration(raw: str, path: Path, line_no: int) -> float:
-    """Convert `mm:ss` or `hh:mm:ss` to seconds."""
+def parse_duration(raw: str) -> float:
+    """Convert `mm:ss` or `hh:mm:ss` to seconds.
+
+    Args:
+        raw: The duration as written.
+
+    Returns:
+        The duration in seconds.
+
+    Raises:
+        ValueError: If it is not a recognisable duration.
+    """
     parts = raw.split(":")
     max_parts = 3  # hh:mm:ss is the longest form accepted
     if len(parts) > max_parts:
-        raise _row_error(path, line_no, f"{raw!r} is not a duration (expected mm:ss or hh:mm:ss)")
+        msg = f"{raw!r} is not a duration (expected mm:ss or hh:mm:ss)"
+        raise ValueError(msg)
     try:
         numbers = [float(part) for part in parts]
     except ValueError as exc:
-        raise _row_error(
-            path, line_no, f"{raw!r} is not a duration (expected mm:ss or hh:mm:ss)"
-        ) from exc
+        msg = f"{raw!r} is not a duration (expected mm:ss or hh:mm:ss)"
+        raise ValueError(msg) from exc
     seconds = 0.0
     for number in numbers:
         seconds = seconds * 60 + number
     return seconds
+
+
+def _parse_measurement(row: Mapping[str, str], path: Path, line_no: int) -> tuple[float, str]:
+    """Return the value and unit for a tests row, naming the offending line."""
+    try:
+        return parse_measurement(_clean(row.get("value")), _clean(row.get("unit")))
+    except ValueError as exc:
+        raise _row_error(path, line_no, str(exc)) from exc
 
 
 def _parse_date(raw: str, path: Path, line_no: int) -> dt.date:

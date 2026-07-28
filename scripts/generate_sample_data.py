@@ -25,7 +25,9 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "sample_data"
 
 # A fictional athlete: gently improving fitness across eighteen months, with
 # enough noise that no trend is a clean line.
-WEIGHT_START_KG, WEIGHT_END_KG = 63.4, 60.6
+# Deliberately unlike the author's own figures. The sample athlete is
+# fictional and its numbers should not resemble anyone real.
+WEIGHT_START_KG, WEIGHT_END_KG = 76.2, 73.4
 RESTING_HR_START, RESTING_HR_END = 54.0, 47.0
 HRV_START, HRV_END = 45.0, 62.0
 VO2MAX_START, VO2MAX_END = 46.0, 53.5

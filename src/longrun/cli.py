@@ -39,11 +39,18 @@ from longrun.errors import IngestError, LongrunError
 from longrun.ingest.base import IngestSummary
 from longrun.ingest.fit import FitFolderIngester
 from longrun.ingest.intervals import IntervalsClient, IntervalsIngester
-from longrun.ingest.manual import load_tests_csv, load_wellness_csv
+from longrun.ingest.manual import (
+    is_wellness_metric,
+    load_tests_csv,
+    load_wellness_csv,
+    measurement_entry,
+    wellness_entry,
+)
 from longrun.ingest.strava import StravaAuthenticator, StravaClient, StravaIngester, TokenStore
 from longrun.ingest.strava.auth import DEFAULT_SCOPE, build_authorize_url
+from longrun.models import Source
 from longrun.report import build_report, load_report_data
-from longrun.report.frames import load_tests
+from longrun.report.frames import format_duration, load_tests
 from longrun.store import Store
 from longrun.store.private import CycleStore
 
@@ -384,6 +391,48 @@ def cycle_remove_command(
         with CycleStore.open(settings.cycle_database) as store:
             removed = store.remove_days(wanted)
         typer.echo(f"Removed {removed} day(s).")
+
+
+@app.command("log")
+def log_command(
+    ctx: typer.Context,
+    metric: Annotated[str, typer.Argument(help="What is being recorded, e.g. weight, vo2max.")],
+    value: Annotated[str, typer.Argument(help="The reading. A duration may be written as 29:25.")],
+    date: Annotated[
+        str | None, typer.Option("--date", help="When it applies to. Defaults to today.")
+    ] = None,
+    unit: Annotated[
+        str, typer.Option("--unit", help="Unit, where the metric has no obvious default.")
+    ] = "",
+    note: Annotated[str, typer.Option("--note", help="Free text kept with the reading.")] = "",
+) -> None:
+    """Record one measurement, without writing a CSV.
+
+    Weight, resting heart rate, HRV, sleep and SpO2 go to the wellness day.
+    Anything else - a VO2max estimate, a blood result, a race time - is a
+    point-in-time measurement and goes to the long-format table, where a new
+    metric needs no schema change.
+
+    Examples:
+        longrun log weight 74.2
+        longrun log vo2max 45 --date 2026-07-20
+        longrun log parkrun_5k 29:25 --note "windy"
+    """
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        parsed = _parse_dates([date] if date else None)
+        day = parsed[0] if parsed else _today()
+
+        if is_wellness_metric(metric):
+            entry = wellness_entry(metric, value, day, Source.MANUAL)
+            store.upsert_wellness([entry])
+            typer.echo(f"Logged {metric.strip().lower()} {value} for {day:%Y-%m-%d}")
+            return
+
+        result = measurement_entry(metric, value, day, unit, Source.MANUAL, note or None)
+        store.upsert_tests([result])
+        shown = format_duration(result.value) if result.unit == "s" else f"{result.value:g}"
+        typer.echo(f"Logged {result.metric} {shown} {result.unit} for {day:%Y-%m-%d}".rstrip())
 
 
 @app.command("goals")

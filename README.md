@@ -18,6 +18,41 @@ as trend visualisations on a shared timeline.
 *Generated from `sample_data/`, which is entirely fabricated. See
 [Sample data](#sample-data).*
 
+## Cheat sheet
+
+Everything below is a normal terminal command run from the project folder.
+Nothing runs in the background and nothing is a daemon: you type a command,
+it does one thing, it stops.
+
+```bash
+# Every so often - pull new activities and wellness from Intervals.icu
+uv run longrun ingest intervals
+
+# Log something by hand, one reading at a time
+uv run longrun log weight 74.2
+uv run longrun log vo2max 45
+uv run longrun log parkrun_5k 29:25 --date 2026-07-25
+
+# See where you are
+uv run longrun plan            # what is worth doing this week
+uv run longrun plan --today    # just the next thing
+uv run longrun readiness       # green / amber / red, with the reasoning
+uv run longrun anchor          # current training paces
+
+# Build the dashboard, then open it
+uv run longrun report
+open data/report.html
+```
+
+`longrun report` writes `data/report.html`. It is a normal web page: open it,
+bookmark it, rebuild it whenever. Nothing is served and nothing is uploaded.
+
+Optional, if you track it: `longrun cycle log 2026-07-25` records a period
+day, and `longrun report --with-cycle` adds a panel for it. That data lives in
+a separate file and never appears in a report unless you ask for it.
+
+Add `--help` to any command to see its options.
+
 ## The design principle
 
 **All analysis is deterministic and computed in Python. Any future LLM layer
