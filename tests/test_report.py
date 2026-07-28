@@ -17,6 +17,7 @@ from longrun.report.figures import (
     build_wellness_figure,
 )
 from longrun.report.frames import (
+    DEFAULT_WINDOW_MONTHS,
     by_cycle_day,
     format_duration,
     load_context_by_week,
@@ -233,19 +234,37 @@ def test_the_cycle_figure_builds_with_nothing_logged(store: Store) -> None:
 
 
 def test_the_cycle_panel_actually_draws_its_phase_bands(seeded_store: Store) -> None:
-    """The caption promises a shaded period and an ovulation line; check they exist.
+    """The key promises a shaded band per phase; check they exist.
 
     Plotly silently discards a shape aimed at a subplot that has no traces
     yet, so this went unnoticed until the page was looked at. Asserting on
-    the shapes keeps a caption from describing something invisible.
+    the shapes keeps a key from describing something invisible.
     """
     data = load_report_data(seeded_store, cycles_from_days(FAKE_CYCLE_LOG))
 
     figure = build_cycle_figure(data)
 
-    kinds = [shape.type for shape in figure.layout.shapes]
-    assert kinds.count("rect") >= 1
-    assert kinds.count("line") >= 1
+    bands = [shape for shape in figure.layout.shapes if shape.type == "rect"]
+    assert bands
+    # Named, so the page's theme script can recolour them by phase rather
+    # than by the order they happened to be added in.
+    assert all(str(shape.name).startswith("phase:") for shape in bands)
+
+
+def test_every_derivable_phase_gets_its_own_colour(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store, cycles_from_days(FAKE_CYCLE_LOG))
+
+    figure = build_cycle_figure(data)
+
+    coloured = {
+        (str(shape.name), str(shape.fillcolor))
+        for shape in figure.layout.shapes
+        if shape.type == "rect"
+    }
+    # One colour per phase name, and no two phases sharing one.
+    by_name = dict(coloured)
+    assert len(by_name) == len(coloured)
+    assert len(set(by_name.values())) == len(by_name)
 
 
 def _mixed_activities() -> pd.DataFrame:
@@ -367,12 +386,27 @@ def test_the_window_starts_where_asked(seeded_store: Store) -> None:
     assert end > start
 
 
-def test_no_window_leaves_the_axes_auto_ranging(seeded_store: Store) -> None:
+def test_asking_for_the_whole_history_leaves_the_axes_auto_ranging(
+    seeded_store: Store,
+) -> None:
     data = load_report_data(seeded_store)
 
-    assert report_window(data, None) is None
+    assert report_window(data, None, whole_history=True) is None
     layout = build_trend_figure(data, None).to_plotly_json()["layout"]
     assert all(not axis.get("range") for name, axis in layout.items() if name.startswith("xaxis"))
+
+
+def test_the_default_window_shows_recent_whole_months(seeded_store: Store) -> None:
+    """Years of history squeeze the interesting part into a strip at the edge."""
+    window = report_window(load_report_data(seeded_store), None)
+
+    assert window is not None
+    start, end = window
+    assert start.day == 1
+    assert start < end
+    # Six whole months back, so the axis labels stay tidy and the start date
+    # does not slide a day at a time as readings arrive.
+    assert (end.year - start.year) * 12 + end.month - start.month == DEFAULT_WINDOW_MONTHS
 
 
 def test_narrowing_the_view_does_not_move_the_personal_best(seeded_store: Store) -> None:

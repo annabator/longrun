@@ -22,6 +22,15 @@ import pandas as pd
 from longrun.analysis.cycle import Cycle
 from longrun.models import Metric, is_running_sport
 from longrun.store import Store
+from longrun.store.exclusions import apply_exclusions
+
+DEFAULT_WINDOW_MONTHS = 6
+"""How much history the panels show unless asked otherwise.
+
+Only the view narrows. Every figure is still computed over the whole store,
+so a personal best set two years ago is still marked as one - it simply sits
+off the left of the axis.
+"""
 
 RESTING_HR_WINDOW = "28D"
 """Averaging window for resting HR, which is daily and noisy."""
@@ -116,6 +125,7 @@ def load_wellness(conn: sqlite3.Connection) -> pd.DataFrame:
     frame = pd.read_sql_query("SELECT * FROM wellness_daily ORDER BY date", conn)
     if frame.empty:
         return frame
+    frame = apply_exclusions(conn, frame)
     frame["date"] = pd.to_datetime(frame["date"], format="ISO8601")
     return frame
 
@@ -300,7 +310,9 @@ def weekly_volume(activities: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({"week_start": week_starts, "distance_km": weekly.to_numpy()})
 
 
-def report_window(data: "ReportData", since: dt.date | None) -> tuple[dt.date, dt.date] | None:
+def report_window(
+    data: "ReportData", since: dt.date | None, *, whole_history: bool = False
+) -> tuple[dt.date, dt.date] | None:
     """Return the date range every panel should share.
 
     Setting one explicit range on every figure is what keeps the panels
@@ -314,15 +326,30 @@ def report_window(data: "ReportData", since: dt.date | None) -> tuple[dt.date, d
 
     Args:
         data: Loaded report frames.
-        since: Earliest date to show, or None to show everything.
+        since: Earliest date to show, or None for the default window.
+        whole_history: Show everything, ignoring the default window.
 
     Returns:
         A `(start, end)` pair, or None when no narrowing is wanted.
     """
-    if since is None:
+    if whole_history:
         return None
     latest = _latest_date(data)
-    return since, max(latest, since)
+    start = since if since is not None else _default_start(latest)
+    return start, max(latest, start)
+
+
+def _default_start(latest: dt.date) -> dt.date:
+    """Return the start of the default window: whole months, recent ones.
+
+    Years of history compress the recent months into an unreadable strip at
+    the right-hand edge, which is where the interesting part is. Snapping to
+    the first of the month keeps the axis labels tidy and the start date
+    stable as new readings arrive, rather than sliding a day at a time.
+    """
+    month = latest.month - DEFAULT_WINDOW_MONTHS
+    year = latest.year + (month - 1) // 12
+    return dt.date(year, (month - 1) % 12 + 1, 1)
 
 
 def _latest_date(data: "ReportData") -> dt.date:
