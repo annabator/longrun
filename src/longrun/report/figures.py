@@ -94,8 +94,9 @@ def build_trend_figure(
     # describe, so each gets its own legend anchored to its own panel.
     _place_panel_legend(figure, legend="legend2", row=3)
     _place_panel_legend(figure, legend="legend3", row=4)
-    if not parkrun.empty:
-        ticks, labels = _duration_ticks(parkrun["value"])
+    shown = _within(parkrun, "date", window)
+    if not shown.empty:
+        ticks, labels = _duration_ticks(shown["value"])
         figure.update_yaxes(tickvals=ticks, ticktext=labels, row=3, col=1)
 
     _apply_window(figure, window)
@@ -112,9 +113,15 @@ def build_wellness_figure(
     share no scale and a twinned axis would invite reading a relationship
     off the crossing points.
 
+    Unlike the trend view, this figure starts where its own data starts. HRV
+    and resting heart rate arrive together and only from the day the watch
+    began syncing them, so holding them to the shared timeline would open the
+    section with months of blank axis. The two panels still share a timeline
+    with each other, which is the comparison that matters here.
+
     Args:
         data: Loaded report frames.
-        window: Date range every panel is pinned to, for alignment.
+        window: Date range to respect, narrowed to where the readings begin.
 
     Returns:
         The wellness figure.
@@ -123,6 +130,7 @@ def build_wellness_figure(
         frames.wellness_series(data.wellness, "hrv_rmssd"), frames.HRV_BASELINE_WINDOW
     )
     resting = frames.resting_hr_trend(data.wellness)
+    window = _from_first_reading(window, hrv, resting.rename(columns={"resting_hr": "value"}))
 
     figure = make_subplots(
         rows=2,
@@ -638,6 +646,12 @@ def _apply_window(figure: go.Figure, window: tuple[dt.date, dt.date] | None) -> 
     view narrows. A series with a week of readings and one with two years
     then sit on the same timeline, which is the point of the shared view.
 
+    Each y-axis is then fitted to what the window actually shows. Left to
+    itself, Plotly scales an axis to every point in the trace, including the
+    ones now off the left-hand edge - so a personal best set two years ago
+    squashes this year's results into half a panel to leave room for a marker
+    nobody can see.
+
     Args:
         figure: The figure to constrain.
         window: `(start, end)` dates, or None to leave auto-ranging alone.
@@ -646,6 +660,82 @@ def _apply_window(figure: go.Figure, window: tuple[dt.date, dt.date] | None) -> 
         return
     start, end = window
     figure.update_xaxes(range=[start.isoformat(), end.isoformat()])
+    _fit_y_to_window(figure, window)
+
+
+_Y_PADDING = 0.10
+"""Share of the visible spread left as breathing room above and below."""
+
+
+def _fit_y_to_window(figure: go.Figure, window: tuple[dt.date, dt.date]) -> None:
+    """Scale each y-axis to the points inside the window."""
+    first, last = pd.Timestamp(window[0]), pd.Timestamp(window[1])
+
+    visible: dict[str, list[float]] = {}
+    for trace in figure.data:
+        xs, ys = getattr(trace, "x", None), getattr(trace, "y", None)
+        if xs is None or ys is None:
+            continue
+        values = visible.setdefault(str(trace.yaxis or "y"), [])
+        # A bar is read from the baseline, so its axis has to include zero
+        # whatever the bars themselves reach.
+        if trace.type == "bar":
+            values.append(0.0)
+        values.extend(
+            float(y)
+            for x, y in zip(xs, ys, strict=True)
+            if y is not None and not pd.isna(y) and first <= pd.Timestamp(x) <= last
+        )
+
+    for axis, values in visible.items():
+        if not values:
+            # Nothing visible on this panel; auto-ranging says more than an
+            # invented range would.
+            continue
+        low, high = min(values), max(values)
+        padding = (high - low) * _Y_PADDING or max(abs(high) * 0.02, 0.5)
+        key = f"yaxis{axis[1:]}" if len(axis) > 1 else "yaxis"
+        figure.update_layout({key: {"range": [low - padding, high + padding]}})
+
+
+def _from_first_reading(
+    window: tuple[dt.date, dt.date] | None, *frames_: pd.DataFrame
+) -> tuple[dt.date, dt.date] | None:
+    """Move a window's start forward to the first reading in these frames.
+
+    Only ever narrows. A window asked for explicitly still holds, and a
+    figure whose series begins later than that simply does not open with
+    empty axis.
+
+    Args:
+        window: The window to narrow, or None to leave auto-ranging alone.
+        *frames_: Frames carrying a `date` column.
+
+    Returns:
+        The narrowed window, or None when there was none to narrow.
+    """
+    if window is None:
+        return None
+    firsts = [
+        pd.Timestamp(frame["date"].min()).date()
+        for frame in frames_
+        if not frame.empty and "date" in frame
+    ]
+    if not firsts:
+        return window
+    start, end = window
+    return max(start, min(firsts)), end
+
+
+def _within(
+    frame: pd.DataFrame, date_column: str, window: tuple[dt.date, dt.date] | None
+) -> pd.DataFrame:
+    """Return the rows falling inside a window, or all of them without one."""
+    if window is None or frame.empty:
+        return frame
+    dates = pd.to_datetime(frame[date_column])
+    first, last = pd.Timestamp(window[0]), pd.Timestamp(window[1])
+    return frame.loc[(dates >= first) & (dates <= last)]
 
 
 def _apply_base_layout(figure: go.Figure) -> None:

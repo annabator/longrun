@@ -261,6 +261,13 @@ start and `--all` shows everything.
 The window is applied to the axis, never by dropping rows, so a personal best
 set two years ago is still marked as one and a rolling baseline is still
 computed over the whole history — they simply sit off the left of the view.
+Each panel's vertical scale then fits what the window shows, so an off-screen
+personal best cannot squash this year's results into half a panel to leave
+room for a marker nobody can see.
+
+The wellness panel is the exception: it starts where its own readings start.
+HRV and resting heart rate only exist from the day the watch began syncing
+them, and opening that section with months of blank axis says nothing.
 
 ### Ignoring a reading the watch got wrong
 
@@ -486,6 +493,13 @@ Type hints throughout, docstrings on public functions, `mypy --strict` clean.
 - **v1.2 – LLM weekly narrative.** A short written summary of the week, phrasing
   figures already computed by v1.0 and v1.1. It does not see the database, and
   it does not produce numbers or plans.
+
+**Under consideration:** generating the plan through real model calls rather
+than only narrating it. That is a change to the design principle above, not an
+addition to it, so it is written down as a decision owed rather than a feature
+queued – see `CLAUDE.md`. The likeliest shape is the model proposing a session
+and deterministic code validating it against the block, the backlog cap and
+the readiness verdict, with every number still coming from the engine.
 
 ## Licence
 

@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from longrun.analysis.cycle import cycles_from_days
-from longrun.models import Activity
+from longrun.models import Activity, Metric
 from longrun.report import build_report, load_report_data
 from longrun.report.figures import (
     build_cycle_figure,
@@ -429,3 +429,50 @@ def test_duration_formatting() -> None:
     assert format_duration(1367) == "22:47"
     assert format_duration(5344) == "1:29:04"
     assert format_duration(59.6) == "1:00"
+
+
+def test_a_narrowed_view_scales_its_y_axes_to_what_it_shows(seeded_store: Store) -> None:
+    """An off-screen personal best must not squash this year into half a panel."""
+    data = load_report_data(seeded_store)
+    recent = (dt.date(2026, 6, 1), dt.date(2026, 6, 30))
+
+    figure = build_trend_figure(data, recent)
+
+    low, high = figure.layout.yaxis3.range
+    shown = metric_series(data.tests, Metric.PARKRUN_5K)
+    inside = shown.loc[
+        (shown["date"] >= pd.Timestamp(recent[0])) & (shown["date"] <= pd.Timestamp(recent[1]))
+    ]
+    assert low <= inside["value"].min()
+    assert high >= inside["value"].max()
+    # The all-time best predates the window, so the axis must not reach it.
+    assert low > shown["value"].min()
+
+
+def test_the_whole_history_still_scales_to_everything(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    figure = build_trend_figure(data, None)
+
+    assert figure.layout.yaxis3.range is None
+
+
+def test_the_wellness_panel_starts_where_its_readings_do(seeded_store: Store) -> None:
+    """HRV and resting HR arrive later than the rest; blank axis says nothing."""
+    data = load_report_data(seeded_store)
+    generous = (dt.date(2020, 1, 1), dt.date(2026, 6, 30))
+
+    figure = build_wellness_figure(data, generous)
+
+    start = dt.date.fromisoformat(str(figure.layout.xaxis.range[0]))
+    first_reading = data.wellness.loc[data.wellness["hrv_rmssd"].notna(), "date"].min().date()
+    assert start == first_reading
+
+
+def test_the_wellness_panel_never_widens_a_window_it_was_given(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+    narrow = (dt.date(2026, 6, 1), dt.date(2026, 6, 30))
+
+    figure = build_wellness_figure(data, narrow)
+
+    assert dt.date.fromisoformat(str(figure.layout.xaxis.range[0])) == narrow[0]
