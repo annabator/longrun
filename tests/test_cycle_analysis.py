@@ -6,6 +6,7 @@ than at ambiguity in the input.
 """
 
 import datetime as dt
+from itertools import pairwise
 
 from longrun.analysis.cycle import (
     Confidence,
@@ -15,6 +16,7 @@ from longrun.analysis.cycle import (
     median_cycle_length,
     ovulation_estimate,
     phase_for,
+    typical_phase_spans,
 )
 
 
@@ -199,3 +201,42 @@ def test_duplicate_and_unsorted_input_is_tolerated() -> None:
 
     assert len(cycles) == 1
     assert cycles[0].period_days == 2
+
+
+def test_the_phase_spans_cover_the_median_cycle_without_overlapping() -> None:
+    spans = typical_phase_spans(cycles_from_days(FAKE_LOG))
+
+    assert [span.phase for span in spans] == [
+        Phase.MENSTRUAL,
+        Phase.FOLLICULAR,
+        Phase.OVULATION,
+        Phase.LUTEAL,
+    ]
+    assert spans[0].first_day == 1
+    for earlier, later in pairwise(spans):
+        assert later.first_day == earlier.last_day + 1
+
+
+def test_the_spans_agree_with_where_a_date_is_placed() -> None:
+    """The bands and the points must not tell different stories."""
+    cycles = cycles_from_days(FAKE_LOG)
+    spans = {span.phase: span for span in typical_phase_spans(cycles)}
+    # The second cycle is completed and of median length, so its own
+    # boundaries should be the typical ones.
+    start = cycles[1].start
+
+    for phase, span in spans.items():
+        day = start + dt.timedelta(days=span.first_day - 1)
+        assert phase_for(day, cycles).phase is phase
+
+
+def test_the_menstrual_span_is_all_that_one_logged_period_supports() -> None:
+    """Ovulation needs a completed cycle; one period does not give a cycle."""
+    spans = typical_phase_spans(cycles_from_days(_period(dt.date(2026, 1, 5))))
+
+    assert [span.phase for span in spans] == [Phase.MENSTRUAL]
+    assert (spans[0].first_day, spans[0].last_day) == (1, 5)
+
+
+def test_nothing_logged_gives_no_spans() -> None:
+    assert typical_phase_spans([]) == []

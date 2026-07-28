@@ -96,6 +96,8 @@ Rules the plan engine must keep:
   weekday, nothing is overdue, and readiness attaches notes rather than
   removing sessions.
 - **Cap the backlog.** Rollover past the cap drops the oldest sessions.
+- **Round a suggested distance to the half-kilometre.** A tenth of a
+  kilometre is a precision none of these numbers has.
 - **Size sessions from the run distribution, never as a share of weekly
   volume.** A percentage rule collapses at low mileage - 30% of a 10 km week
   is a 3 km "long run". Below the minimum run count, suggest nothing rather
@@ -153,6 +155,15 @@ data must never be committed under any circumstance.
   real.
 - The generated dashboard must stay self-contained: no CDN, no outbound request
   from a page of personal health metrics. There is a test asserting this.
+- **Never reject a reading automatically.** A bad one is excluded by hand with
+  a stated reason, recorded in `wellness_exclusions` and suppressed on read
+  rather than deleted - the next sync would fetch a deleted row back. An
+  outlier rule would eventually discard the genuinely unusual morning, which
+  is the reading worth keeping.
+- **Colours are validated, not chosen by eye.** Any change to the data hues in
+  `report/theme.py` must be re-checked for colour-vision separation against
+  both surfaces, for the pairs that actually share a panel. The module
+  docstring records which pairs those are and where the current set sits.
 
 ## Layout
 
@@ -164,6 +175,7 @@ src/longrun/
   errors.py         LongrunError hierarchy; the CLI prints these plainly
   store/
     schema.py       DDL at the current SCHEMA_VERSION
+    exclusions.py   readings suppressed by hand, with the reason
     migrations.py   versioned, idempotent, row-preserving
     repository.py   upserts on natural keys
   ingest/

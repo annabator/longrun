@@ -54,6 +54,7 @@ from longrun.models import Source
 from longrun.report import build_report, load_report_data
 from longrun.report.frames import format_duration, load_tests
 from longrun.store import Store
+from longrun.store.exclusions import add_exclusion, list_exclusions, remove_exclusion
 from longrun.store.private import CycleStore
 
 app = typer.Typer(
@@ -437,6 +438,81 @@ def log_command(
         typer.echo(f"Logged {result.metric} {shown} {result.unit} for {day:%Y-%m-%d}".rstrip())
 
 
+@app.command("exclude")
+def exclude_command(
+    ctx: typer.Context,
+    date: Annotated[
+        str | None, typer.Argument(help="The day the bad reading is on (YYYY-MM-DD).")
+    ] = None,
+    field: Annotated[
+        str | None, typer.Argument(help="Which reading to suppress, e.g. resting_hr.")
+    ] = None,
+    reason: Annotated[
+        str, typer.Option("--reason", help="Why it is wrong. Kept with the exclusion.")
+    ] = "",
+    undo: Annotated[
+        bool, typer.Option("--undo", help="Restore a reading excluded earlier.")
+    ] = False,
+) -> None:
+    """Ignore a single wellness reading that is known to be wrong.
+
+    For the reading a watch gets plainly wrong - an optical sensor losing the
+    wrist and reporting a resting heart rate nobody has. The stored value is
+    left alone and hidden on the way out, so the call stays reversible and
+    the reason stays attached to it. Deleting the row would not work: the
+    next sync fetches it again.
+
+    Called with no arguments, lists what is currently excluded.
+
+    Examples:
+        longrun exclude 2026-07-19 resting_hr --reason "sensor lost the wrist"
+        longrun exclude 2026-07-19 resting_hr --undo
+        longrun exclude
+    """
+    settings = _settings(ctx)
+    with _friendly_errors(), Store.open(settings.database) as store:
+        if date is None or field is None:
+            _echo_exclusions(store)
+            return
+
+        day = _parse_dates([date])[0]
+        if undo:
+            removed = remove_exclusion(store.conn, day.isoformat(), field)
+            typer.echo(
+                f"Restored {field} for {day:%Y-%m-%d}"
+                if removed
+                else f"No exclusion recorded for {field} on {day:%Y-%m-%d}"
+            )
+            return
+
+        if not reason:
+            typer.secho(
+                "Say why with --reason. An unexplained exclusion is "
+                "indistinguishable from tidying away an inconvenient reading.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        try:
+            add_exclusion(store.conn, day.isoformat(), field, reason)
+        except ValueError as exc:
+            typer.secho(str(exc), fg=typer.colors.YELLOW, err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(f"Excluding {field} for {day:%Y-%m-%d}: {reason}")
+
+
+def _echo_exclusions(store: Store) -> None:
+    """List the readings currently being suppressed."""
+    recorded = list_exclusions(store.conn)
+    if not recorded:
+        typer.echo("Nothing is excluded. Every stored reading is being shown.")
+        return
+    typer.echo(f"{len(recorded)} reading(s) excluded:\n")
+    for date, field, reason in recorded:
+        typer.echo(f"  {date}  {field:<16}{reason}")
+
+
 @app.command("goals")
 def goals_command(
     ctx: typer.Context,
@@ -624,9 +700,17 @@ def report_command(
         typer.Option(
             "--since",
             help="Earliest date to show (YYYY-MM-DD). Every panel is pinned to "
-            "the same range, so sparse and dense series line up.",
+            "the same range, so sparse and dense series line up. Defaults to "
+            "the last few months.",
         ),
     ] = None,
+    whole_history: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Show every reading ever stored, rather than the recent window.",
+        ),
+    ] = False,
     with_cycle: Annotated[
         bool,
         typer.Option(
@@ -655,7 +739,13 @@ def report_command(
             )
             raise typer.Exit(code=1)
         parsed = _parse_dates([since] if since else None)
-        written = build_report(data, destination, title=title, since=parsed[0] if parsed else None)
+        written = build_report(
+            data,
+            destination,
+            title=title,
+            since=parsed[0] if parsed else None,
+            whole_history=whole_history,
+        )
     typer.echo(f"Wrote {written}")
     if with_cycle:
         typer.secho(

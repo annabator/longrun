@@ -191,6 +191,72 @@ def median_cycle_length(cycles: Sequence[Cycle]) -> int | None:
     return int(statistics.median(lengths))
 
 
+@dataclass(frozen=True)
+class PhaseSpan:
+    """Where a phase typically falls, in cycle days.
+
+    Attributes:
+        phase: Which phase.
+        first_day: First cycle day of the span, counting day 1 as the first
+            period day.
+        last_day: Last cycle day of the span, inclusive.
+    """
+
+    phase: Phase
+    first_day: int
+    last_day: int
+
+
+def typical_phase_spans(cycles: Sequence[Cycle]) -> list[PhaseSpan]:
+    """Return where each phase usually falls across the logged cycles.
+
+    Medians, not a template: the boundaries come from the logged period
+    lengths and the ovulation estimates derived from them, so they describe
+    these cycles rather than a textbook twenty-eight-day one. They are still
+    only typical - no single cycle is obliged to match them, and the
+    ovulation-based boundaries inherit every caveat in
+    :func:`ovulation_estimate`.
+
+    Args:
+        cycles: Cycles, typically from :func:`cycles_from_days`.
+
+    Returns:
+        The spans in the order the phases occur, omitting any that the logged
+        data cannot place. Empty when nothing has been logged.
+    """
+    if not cycles:
+        return []
+
+    period_days = int(statistics.median(cycle.period_days for cycle in cycles))
+    spans = [PhaseSpan(Phase.MENSTRUAL, 1, period_days)]
+
+    ovulation_day = _median_ovulation_day(cycles)
+    length = median_cycle_length(cycles)
+    if ovulation_day is None or length is None:
+        return spans
+
+    window = OVULATION_WINDOW_DAYS
+    # The follicular phase is what is left between the period ending and the
+    # ovulation window opening, which on a short cycle can be nothing at all.
+    if period_days + 1 <= ovulation_day - window - 1:
+        spans.append(PhaseSpan(Phase.FOLLICULAR, period_days + 1, ovulation_day - window - 1))
+    spans.append(PhaseSpan(Phase.OVULATION, ovulation_day - window, ovulation_day + window))
+    if ovulation_day + window + 1 <= length:
+        spans.append(PhaseSpan(Phase.LUTEAL, ovulation_day + window + 1, length))
+    return spans
+
+
+def _median_ovulation_day(cycles: Sequence[Cycle]) -> int | None:
+    """Return the median estimated ovulation day across completed cycles."""
+    median_length = median_cycle_length(cycles)
+    days = [
+        (estimate - cycle.start).days + 1
+        for cycle in cycles
+        if cycle.is_complete and (estimate := ovulation_estimate(cycle, median_length)) is not None
+    ]
+    return int(statistics.median(days)) if days else None
+
+
 def ovulation_estimate(cycle: Cycle, median_length: int | None) -> dt.date | None:
     """Estimate the ovulation date for one cycle.
 

@@ -14,11 +14,13 @@ from longrun.analysis.cycle import (
     Cycle,
     Phase,
     PhaseEstimate,
+    PhaseSpan,
     cycle_day_for,
     cycles_from_days,
     median_cycle_length,
     ovulation_estimate,
     phase_for,
+    typical_phase_spans,
 )
 
 __all__ = [
@@ -26,9 +28,11 @@ __all__ = [
     "Cycle",
     "Phase",
     "PhaseEstimate",
+    "PhaseSpan",
     "cycle_day_for",
     "cycles_from_days",
     "median_cycle_length",
     "ovulation_estimate",
     "phase_for",
+    "typical_phase_spans",
 ]

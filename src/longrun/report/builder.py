@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.offline import get_plotlyjs
 
+from longrun.analysis.cycle import Phase
 from longrun.errors import ReportError
 from longrun.models import Metric, is_running_sport
 from longrun.report import figures, frames
@@ -30,6 +31,7 @@ def build_report(
     *,
     title: str = "longrun",
     since: dt.date | None = None,
+    whole_history: bool = False,
 ) -> Path:
     """Render the dashboard to a self-contained HTML file.
 
@@ -43,6 +45,9 @@ def build_report(
             with two years share a timeline instead of each auto-scaling to
             its own. Applied to the axis, not by dropping rows, so a personal
             best or a rolling baseline stays computed over the whole history.
+            Defaults to the last :data:`~longrun.report.frames.
+            DEFAULT_WINDOW_MONTHS` months.
+        whole_history: Show every reading ever stored, however old.
 
     Returns:
         The path written.
@@ -50,7 +55,7 @@ def build_report(
     Raises:
         ReportError: If the file cannot be written.
     """
-    window = frames.report_window(data, since)
+    window = frames.report_window(data, since, whole_history=whole_history)
     document = _render_document(
         title=title,
         summary=_summary_tiles(data),
@@ -93,7 +98,7 @@ def _summary_tiles(data: frames.ReportData) -> str:
         runs = frames.running_activities(data.activities)
         others = frames.other_activities(data.activities)
         total_km = float(runs["distance_m"].sum()) / 1000.0 if not runs.empty else 0.0
-        tiles.append(("Runs", f"{len(runs):,}", "ingested"))
+        tiles.append(("Runs", f"{len(runs):,}", "logged"))
         tiles.append(("Distance", f"{total_km:,.0f}", "km running"))
         if not others.empty:
             tiles.append(("Cross-training", f"{len(others):,}", "other sessions"))
@@ -152,20 +157,77 @@ def _cycle_section(data: frames.ReportData) -> str:
     <h2>By cycle day <span class="badge">private</span></h2>
     <p class="note">
       Readings placed on the cycle day they fell on, every cycle overlaid.
-      Cycle boundaries come from logged period days. The shaded band is the
-      median period and the dashed line the median ovulation estimate &mdash;
-      both inferred rather than observed, both medians across cycles, and both
-      softer than they look. Points only, since readings days apart say
-      nothing about the days between, and no averages or tests of difference
-      are computed over what is a handful of cycles.
+      Cycle boundaries come from logged period days, and the shaded phases are
+      medians across those cycles &mdash; where the boundaries usually fall,
+      not where they fell in any one cycle. Ovulation in particular is
+      inferred by counting back from the next period rather than observed.
+      Points only, since readings days apart say nothing about the days
+      between, and no averages or tests of difference are computed over what
+      is a handful of cycles.
+    </p>
+    {figure}
+{_phase_key()}
+    <p class="note">
+      What follows each phase is textbook physiology, not a reading of the
+      chart above. Whether any of it shows up in these points is exactly the
+      question the panel is for, and the honest answer over a handful of
+      cycles is usually that it is too early to say.
     </p>
     <p class="note">
       This section only appears because it was asked for with
       <code>--with-cycle</code>. The underlying data is stored separately from
       everything else and is never sent anywhere.
     </p>
-    {figure}
   </section>"""
+
+
+_PHASE_NOTES: tuple[tuple[Phase, str, str], ...] = (
+    (
+        Phase.MENSTRUAL,
+        "Menstrual",
+        "Oestrogen and progesterone are both at their lowest. Iron losses "
+        "over the period are the one thing here with a clear performance "
+        "consequence, and only if they are heavy enough to matter.",
+    ),
+    (
+        Phase.FOLLICULAR,
+        "Follicular",
+        "Oestrogen climbs towards its mid-cycle peak. Body temperature and "
+        "resting heart rate typically sit at their lowest for the cycle.",
+    ),
+    (
+        Phase.OVULATION,
+        "Ovulation",
+        "Oestrogen peaks and falls away; a small sustained rise in body "
+        "temperature follows and is what marks the phase change.",
+    ),
+    (
+        Phase.LUTEAL,
+        "Luteal",
+        "Progesterone rises. Core temperature runs a few tenths higher, "
+        "resting heart rate tends to sit slightly higher and HRV slightly "
+        "lower, and heat is harder to lose &mdash; so the same effort can "
+        "feel warmer without being harder.",
+    ),
+)
+"""General physiology, in the order the phases occur.
+
+Deliberately about the phases rather than about the athlete: this text is
+fixed, and describing what the chart appears to show would be an
+interpretation of a handful of cycles dressed up as a finding.
+"""
+
+
+def _phase_key() -> str:
+    """Render the phase colour key and what each phase is."""
+    items = "\n".join(
+        f"""      <div class="phase">
+        <span class="swatch" style="background: var(--phase-{index})"></span>
+        <div><strong>{html.escape(name)}</strong> {note}</div>
+      </div>"""
+        for index, (_, name, note) in enumerate(_PHASE_NOTES)
+    )
+    return f'    <div class="phase-key">\n{items}\n    </div>'
 
 
 def _activity_table(data: frames.ReportData) -> str:
@@ -313,12 +375,12 @@ const EMPTY_MESSAGE = {json.dumps(figures.EMPTY_PANEL_MESSAGE)};
 """
 
 
-def _palette_tokens(palette: Palette) -> dict[str, str]:
+def _palette_tokens(palette: Palette) -> dict[str, str | list[str]]:
     """Expose a palette to the page script as a plain mapping."""
     return {
         "surface": palette.surface,
         "series": palette.series,
-        "series_alt": palette.series_alt,
+        "phases": list(palette.phases),
         "accent": palette.accent,
         "raw": palette.raw,
         "grid": palette.grid,
@@ -338,6 +400,10 @@ _STYLES = f""":root {{
   --muted: {LIGHT.ink_muted};
   --grid: {LIGHT.grid};
   --border: rgba(11, 11, 11, 0.10);
+  --phase-0: {LIGHT.phases[0]};
+  --phase-1: {LIGHT.phases[1]};
+  --phase-2: {LIGHT.phases[2]};
+  --phase-3: {LIGHT.phases[3]};
 }}
 @media (prefers-color-scheme: dark) {{
   :root {{
@@ -349,6 +415,10 @@ _STYLES = f""":root {{
     --muted: {DARK.ink_muted};
     --grid: {DARK.grid};
     --border: rgba(255, 255, 255, 0.10);
+    --phase-0: {DARK.phases[0]};
+    --phase-1: {DARK.phases[1]};
+    --phase-2: {DARK.phases[2]};
+    --phase-3: {DARK.phases[3]};
   }}
 }}
 * {{ box-sizing: border-box; }}
@@ -405,6 +475,23 @@ th {{ color: var(--secondary); font-weight: 600; }}
   text-transform: uppercase;
   vertical-align: middle;
 }}
+.phase-key {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem 1.25rem;
+  margin: 0.75rem 0 1rem;
+  color: var(--secondary);
+  font-size: 0.82rem;
+}}
+.phase {{ display: flex; gap: 0.55rem; align-items: baseline; }}
+.phase strong {{ color: var(--primary); font-weight: 600; }}
+.swatch {{
+  flex: none;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}}
 code {{ font-size: 0.85em; }}
 .empty {{ color: var(--muted); }}
 footer {{ color: var(--muted); font-size: 0.8rem; }}
@@ -414,7 +501,7 @@ footer {{ color: var(--muted); font-size: 0.8rem; }}
 """
 
 
-_THEME_SCRIPT = """
+_THEME_SCRIPT = r"""
 function longrunApplyTheme(mode) {
   const tokens = LONGRUN_PALETTES[mode];
   document.querySelectorAll('.js-plotly-plot').forEach(function (gd) {
@@ -448,6 +535,12 @@ function longrunApplyTheme(mode) {
       } else if (/^yaxis/.test(key)) {
         layoutUpdate[key + '.gridcolor'] = tokens.grid;
         layoutUpdate[key + '.tickfont.color'] = tokens.muted;
+      }
+    });
+    (gd.layout.shapes || []).forEach(function (shape, index) {
+      const match = /^phase:(\d+)$/.exec(shape.name || '');
+      if (match) {
+        layoutUpdate['shapes[' + index + '].fillcolor'] = tokens.phases[Number(match[1])];
       }
     });
     (gd.layout.annotations || []).forEach(function (annotation, index) {

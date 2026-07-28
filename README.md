@@ -33,6 +33,9 @@ uv run longrun log weight 74.2
 uv run longrun log vo2max 45
 uv run longrun log parkrun_5k 29:25 --date 2026-07-25
 
+# Ignore a reading the watch plainly got wrong
+uv run longrun exclude 2026-07-19 resting_hr --reason "sensor lost the wrist"
+
 # See where you are
 uv run longrun plan            # what is worth doing this week
 uv run longrun plan --today    # just the next thing
@@ -43,8 +46,9 @@ uv run longrun anchor          # current training paces
 uv run longrun report
 open data/report.html
 
-# Narrow every panel to the same window, so sparse and dense series line up
+# The panels show the last six months. Widen or narrow that:
 uv run longrun report --since 2025-12-01
+uv run longrun report --all
 ```
 
 `longrun report` writes `data/report.html`. It is a normal web page: open it,
@@ -247,6 +251,39 @@ uv run longrun report --output report.html
 
 Use `--db path/to.db` to work against a different store.
 
+### The dashboard's time window
+
+The panels show the last six months by default, snapped to whole months.
+Years of history squeeze the recent weeks into an unreadable strip at the
+right-hand edge, which is where the interesting part is. `--since` moves the
+start and `--all` shows everything.
+
+The window is applied to the axis, never by dropping rows, so a personal best
+set two years ago is still marked as one and a rolling baseline is still
+computed over the whole history — they simply sit off the left of the view.
+
+### Ignoring a reading the watch got wrong
+
+An optical sensor that loses the wrist reports a resting heart rate nobody
+has, and one figure like that distorts a baseline for a month.
+
+```bash
+uv run longrun exclude 2026-07-19 resting_hr --reason "sensor lost the wrist"
+uv run longrun exclude                        # what is currently excluded
+uv run longrun exclude 2026-07-19 resting_hr --undo
+```
+
+Three deliberate choices here. Deleting the row would not work, because the
+next sync fetches it again — so the value stays stored and is suppressed on
+the way out, which also makes the call reversible. A reason is required,
+since an unexplained exclusion is indistinguishable from tidying away an
+inconvenient reading. And nothing is rejected automatically: an outlier rule
+would eventually throw away the genuinely unusual morning, which is the one
+worth keeping.
+
+Only that one cell is hidden. Excluding a resting heart rate says nothing
+about the same morning's HRV.
+
 ### CSV formats
 
 `--wellness` – only `date` is required; blank cells mean "not recorded".
@@ -373,7 +410,9 @@ plus a warm-up and cool-down. Easy and long runs also carry a time, since
 that is how they are really judged; rep sessions do not, since a total time
 for one would only mislead. Under four recent runs nothing is suggested,
 which is the honest answer for someone starting out. Rides and gym sessions
-are excluded, so a long ride cannot inflate a run.
+are excluded, so a long ride cannot inflate a run. Everything is rounded to
+the half-kilometre, because "7.9 km" implies a precision the number does not
+have.
 
 **Adaptation suggests, it does not adjust.** Running quicker than prescribed
 *at a lower heart rate* across several sessions means the anchor looks stale,
@@ -402,6 +441,14 @@ This is the most sensitive data here, and it is isolated accordingly:
   pre-commit hook, and a test fails if any of those rules stops matching.
 - **Opt-in on the dashboard.** Without `--with-cycle` the report contains no
   trace of it, so an ordinary report stays safe to show someone.
+
+The panel places HRV, resting heart rate, weight and VO₂max on the cycle day
+each reading fell on, with every cycle overlaid and the phases shaded behind
+them. The bands are medians across the logged cycles — where the boundaries
+usually fall, not where they fell in any one — and a key beside the chart says
+what each phase is physiologically. That text is fixed textbook material, not
+a reading of the chart: whether any of it shows up in a handful of cycles is
+the open question, and the page says so instead of answering it.
 
 Only the logged days are stored. Cycle day and phase are computed at read time
 and never written down, and every phase is reported as an estimate with the
