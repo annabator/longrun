@@ -147,6 +147,18 @@ Long enough to survive a quiet fortnight, short enough that the suggestion
 follows current form rather than last season's.
 """
 
+SIZING_STEP_KM = 0.5
+"""Distances are rounded to this, because none of them is precise.
+
+A suggestion of 7.9 km implies a hundred metres matters. Rounding to the
+half-kilometre says what the number actually is: roughly this far.
+"""
+
+
+def _to_step(distance_km: float) -> float:
+    """Round a distance to the nearest :data:`SIZING_STEP_KM`."""
+    return round(distance_km / SIZING_STEP_KM) * SIZING_STEP_KM
+
 
 @dataclass(frozen=True)
 class Sizing:
@@ -185,7 +197,7 @@ def size_from_history(distances_km: Sequence[float]) -> Sizing | None:
     # Just past the longest recent run, but never so close to the easy run
     # that the two stop being different sessions.
     long_run = max(usable[-1] * LONG_RUN_GROWTH, easy * LONG_RUN_MIN_RATIO)
-    return Sizing(easy_km=round(easy, 1), long_km=round(long_run, 1))
+    return Sizing(easy_km=_to_step(easy), long_km=_to_step(long_run))
 
 
 def suggested_distance(session: Session, sizing: Sizing | None) -> float | None:
@@ -206,8 +218,8 @@ def suggested_distance(session: Session, sizing: Sizing | None) -> float | None:
         return sizing.easy_km
     if session.family is Family.STRIDES:
         # Strides hang off the end of an easy run rather than replacing it.
-        return round(sizing.easy_km + session.work_km, 1)
-    return round(session.work_km + QUALITY_SUPPORT_KM, 1)
+        return _to_step(sizing.easy_km + session.work_km)
+    return _to_step(session.work_km + QUALITY_SUPPORT_KM)
 
 
 @dataclass(frozen=True)

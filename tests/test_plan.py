@@ -11,8 +11,10 @@ from longrun.analysis.plan import (
     LONG_RUN_MIN_RATIO,
     QUALITY_SUPPORT_KM,
     SESSION_LIBRARY,
+    SIZING_STEP_KM,
     SIZING_WINDOW_WEEKS,
     Family,
+    _to_step,
     block_for,
     build_menu,
     outstanding_after,
@@ -219,7 +221,7 @@ def test_easy_is_the_median_run_and_long_goes_just_beyond_the_longest() -> None:
 
     assert sizing is not None
     assert sizing.easy_km == 5.0
-    assert sizing.long_km == 8.4  # 8.0 * LONG_RUN_GROWTH
+    assert sizing.long_km == 8.5  # 8.0 * LONG_RUN_GROWTH, to the nearest half
 
 
 def test_a_long_run_stays_longer_than_an_easy_one() -> None:
@@ -249,7 +251,7 @@ def test_quality_sessions_are_sized_around_the_hard_part() -> None:
     menu = build_menu(goals, MONDAY, week_index=0, sizing=sizing)
     quality = next(s for s in menu.sessions if s.session.family is Family.THRESHOLD)
 
-    assert quality.distance_km == quality.session.work_km + QUALITY_SUPPORT_KM
+    assert quality.distance_km == _to_step(quality.session.work_km + QUALITY_SUPPORT_KM)
     # A rep session is judged by the reps, not by a total time.
     assert quality.duration_min is None
 
@@ -271,9 +273,9 @@ def test_easy_and_long_runs_get_a_time_on_feet() -> None:
     menu = build_menu(goals, MONDAY, week_index=0, sizing=sizing, easy_pace_s_per_km=360.0)
     long_run = next(s for s in menu.sessions if s.session.family is Family.LONG)
 
-    assert long_run.distance_km == 8.4
+    assert long_run.distance_km == 8.5
     assert long_run.duration_min is not None
-    assert round(long_run.duration_min) == 50  # 8.4 km at 6:00/km
+    assert round(long_run.duration_min) == 51  # 8.5 km at 6:00/km
 
 
 def test_without_a_pace_a_distance_is_still_suggested() -> None:
@@ -283,7 +285,7 @@ def test_without_a_pace_a_distance_is_still_suggested() -> None:
     long_run = next(s for s in menu.sessions if s.session.family is Family.LONG)
 
     assert long_run.duration_min is None
-    assert long_run.size_label() == "~8.4 km"
+    assert long_run.size_label() == "~8.5 km"
 
 
 def test_with_no_history_the_menu_suggests_no_distances() -> None:
@@ -342,3 +344,12 @@ def test_runs_beyond_the_window_do_not_size_anything(store: Store) -> None:
     _run(store, today, "Run", 5_000.0)
 
     assert recent_run_distances(store, today) == [5.0]
+
+
+def test_distances_land_on_the_half_kilometre() -> None:
+    """A suggestion of 7.9 km implies a precision the number does not have."""
+    sizing = size_from_history([5.1, 5.3, 5.9, 6.1, 7.6])
+
+    assert sizing is not None
+    assert sizing.easy_km % SIZING_STEP_KM == 0
+    assert sizing.long_km % SIZING_STEP_KM == 0
