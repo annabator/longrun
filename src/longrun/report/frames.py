@@ -12,6 +12,7 @@ while being nothing of the sort. The dashboard shows the series and lets the
 reader look.
 """
 
+import datetime as dt
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -297,6 +298,42 @@ def weekly_volume(activities: pd.DataFrame) -> pd.DataFrame:
     )
     week_starts = pd.DatetimeIndex(weekly.index).tz_localize(None)
     return pd.DataFrame({"week_start": week_starts, "distance_km": weekly.to_numpy()})
+
+
+def report_window(data: "ReportData", since: dt.date | None) -> tuple[dt.date, dt.date] | None:
+    """Return the date range every panel should share.
+
+    Setting one explicit range on every figure is what keeps the panels
+    aligned. Letting each auto-scale to its own data would put a series with
+    a week of readings on a different timeline from one with two years, which
+    is precisely what makes a shared-timeline view worth having.
+
+    The range is applied to the axis rather than by filtering rows, so that
+    figures computed over the whole history - a personal best, a rolling
+    baseline - stay correct while the view narrows.
+
+    Args:
+        data: Loaded report frames.
+        since: Earliest date to show, or None to show everything.
+
+    Returns:
+        A `(start, end)` pair, or None when no narrowing is wanted.
+    """
+    if since is None:
+        return None
+    latest = _latest_date(data)
+    return since, max(latest, since)
+
+
+def _latest_date(data: "ReportData") -> dt.date:
+    """Return the most recent date anywhere in the report data."""
+    candidates: list[dt.date] = []
+    if not data.activities.empty:
+        candidates.append(pd.Timestamp(data.activities["start_time"].max()).date())
+    for frame in (data.wellness, data.tests):
+        if not frame.empty:
+            candidates.append(pd.Timestamp(frame["date"].max()).date())
+    return max(candidates) if candidates else dt.datetime.now(tz=dt.UTC).date()
 
 
 def running_activities(activities: pd.DataFrame) -> pd.DataFrame:

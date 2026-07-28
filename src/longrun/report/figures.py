@@ -13,6 +13,7 @@ Nothing here computes a statistic. Figures are drawn from series prepared in
 :mod:`longrun.report.frames`.
 """
 
+import datetime as dt
 from collections.abc import Sequence
 from statistics import median
 from typing import Any
@@ -41,7 +42,9 @@ EMPTY_PANEL_MESSAGE = "No data yet - run an ingest command first"
 """Shown in place of a panel with nothing to plot; the page script styles it."""
 
 
-def build_trend_figure(data: frames.ReportData) -> go.Figure:
+def build_trend_figure(
+    data: frames.ReportData, window: tuple[dt.date, dt.date] | None = None
+) -> go.Figure:
     """Build the shared-timeline trend view.
 
     Four stacked panels - weight, VO2max, parkrun 5k and resting heart rate -
@@ -50,6 +53,7 @@ def build_trend_figure(data: frames.ReportData) -> go.Figure:
 
     Args:
         data: Loaded report frames.
+        window: Date range every panel is pinned to, for alignment.
 
     Returns:
         The trend figure.
@@ -92,11 +96,14 @@ def build_trend_figure(data: frames.ReportData) -> go.Figure:
         ticks, labels = _duration_ticks(parkrun["value"])
         figure.update_yaxes(tickvals=ticks, ticktext=labels, row=3, col=1)
 
+    _apply_window(figure, window)
     _apply_base_layout(figure)
     return figure
 
 
-def build_wellness_figure(data: frames.ReportData) -> go.Figure:
+def build_wellness_figure(
+    data: frames.ReportData, window: tuple[dt.date, dt.date] | None = None
+) -> go.Figure:
     """Build the wellness view: HRV rMSSD above resting heart rate.
 
     Two panels rather than one, because milliseconds and beats per minute
@@ -105,6 +112,7 @@ def build_wellness_figure(data: frames.ReportData) -> go.Figure:
 
     Args:
         data: Loaded report frames.
+        window: Date range every panel is pinned to, for alignment.
 
     Returns:
         The wellness figure.
@@ -143,6 +151,7 @@ def build_wellness_figure(data: frames.ReportData) -> go.Figure:
     figure.update_layout(height=_PANEL_HEIGHT_PX * 2 + 40, hovermode="x unified", showlegend=True)
     _place_panel_legend(figure, legend="legend", row=1)
     _place_panel_legend(figure, legend="legend2", row=2)
+    _apply_window(figure, window)
     _apply_base_layout(figure)
     return figure
 
@@ -204,6 +213,7 @@ def build_cycle_figure(data: frames.ReportData) -> go.Figure:
     )
     figure.update_xaxes(title_text="Cycle day", row=len(panels), col=1)
     _place_panel_legend(figure, legend="legend", row=1)
+    # No date window here: this figure's x-axis is cycle day, not the calendar.
     _apply_base_layout(figure)
     return figure
 
@@ -301,7 +311,9 @@ def _median_ovulation_day(cycles: Sequence[Cycle]) -> int | None:
     return int(median(days)) if days else None
 
 
-def build_load_context_figure(data: frames.ReportData) -> go.Figure:
+def build_load_context_figure(
+    data: frames.ReportData, window: tuple[dt.date, dt.date] | None = None
+) -> go.Figure:
     """Build the cross-training view: non-running sessions per week.
 
     Counted in sessions and in the load figure Intervals.icu computes, not in
@@ -311,6 +323,7 @@ def build_load_context_figure(data: frames.ReportData) -> go.Figure:
 
     Args:
         data: Loaded report frames.
+        window: Date range every panel is pinned to, for alignment.
 
     Returns:
         The cross-training figure.
@@ -355,15 +368,19 @@ def build_load_context_figure(data: frames.ReportData) -> go.Figure:
         bargap=0.25,
         hovermode="x unified",
     )
+    _apply_window(figure, window)
     _apply_base_layout(figure)
     return figure
 
 
-def build_weekly_volume_figure(data: frames.ReportData) -> go.Figure:
+def build_weekly_volume_figure(
+    data: frames.ReportData, window: tuple[dt.date, dt.date] | None = None
+) -> go.Figure:
     """Build the weekly running volume bar chart.
 
     Args:
         data: Loaded report frames.
+        window: Date range every panel is pinned to, for alignment.
 
     Returns:
         The volume figure.
@@ -388,6 +405,7 @@ def build_weekly_volume_figure(data: frames.ReportData) -> go.Figure:
         yaxis_title="km",
         hovermode="x unified",
     )
+    _apply_window(figure, window)
     _apply_base_layout(figure)
     return figure
 
@@ -604,6 +622,24 @@ def _annotate_empty(figure: go.Figure, row: int | None = None) -> None:
         figure.add_annotation(row=row, col=1, **kwargs)
     else:
         figure.add_annotation(**kwargs)
+
+
+def _apply_window(figure: go.Figure, window: tuple[dt.date, dt.date] | None) -> None:
+    """Pin every date axis in a figure to the same range.
+
+    Set on the axis rather than by dropping rows, so a personal best or a
+    rolling baseline computed over the whole history stays correct while the
+    view narrows. A series with a week of readings and one with two years
+    then sit on the same timeline, which is the point of the shared view.
+
+    Args:
+        figure: The figure to constrain.
+        window: `(start, end)` dates, or None to leave auto-ranging alone.
+    """
+    if window is None:
+        return
+    start, end = window
+    figure.update_xaxes(range=[start.isoformat(), end.isoformat()])
 
 
 def _apply_base_layout(figure: go.Figure) -> None:

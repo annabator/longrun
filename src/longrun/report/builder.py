@@ -24,7 +24,13 @@ ACTIVITY_TABLE_ROWS = 25
 """How many recent activities the summary table lists."""
 
 
-def build_report(data: frames.ReportData, output_path: Path, *, title: str = "longrun") -> Path:
+def build_report(
+    data: frames.ReportData,
+    output_path: Path,
+    *,
+    title: str = "longrun",
+    since: dt.date | None = None,
+) -> Path:
     """Render the dashboard to a self-contained HTML file.
 
     Args:
@@ -32,6 +38,11 @@ def build_report(data: frames.ReportData, output_path: Path, *, title: str = "lo
         output_path: Where to write the HTML file; parent directories are
             created as needed.
         title: Page title.
+        since: Earliest date to show. Every dated panel is pinned to the same
+            range from here, so a series with a fortnight of readings and one
+            with two years share a timeline instead of each auto-scaling to
+            its own. Applied to the axis, not by dropping rows, so a personal
+            best or a rolling baseline stays computed over the whole history.
 
     Returns:
         The path written.
@@ -39,14 +50,15 @@ def build_report(data: frames.ReportData, output_path: Path, *, title: str = "lo
     Raises:
         ReportError: If the file cannot be written.
     """
+    window = frames.report_window(data, since)
     document = _render_document(
         title=title,
         summary=_summary_tiles(data),
-        trend_div=_figure_div(figures.build_trend_figure(data), "trend"),
-        wellness_div=_figure_div(figures.build_wellness_figure(data), "wellness"),
+        trend_div=_figure_div(figures.build_trend_figure(data, window), "trend"),
+        wellness_div=_figure_div(figures.build_wellness_figure(data, window), "wellness"),
         cycle_section=_cycle_section(data),
-        volume_div=_figure_div(figures.build_weekly_volume_figure(data), "volume"),
-        load_context_section=_load_context_section(data),
+        volume_div=_figure_div(figures.build_weekly_volume_figure(data, window), "volume"),
+        load_context_section=_load_context_section(data, window),
         activity_table=_activity_table(data),
         generated_at=dt.datetime.now(tz=dt.UTC),
     )
@@ -110,11 +122,11 @@ def _summary_tiles(data: frames.ReportData) -> str:
     return f'    <section class="tiles">\n{cells}\n    </section>'
 
 
-def _load_context_section(data: frames.ReportData) -> str:
+def _load_context_section(data: frames.ReportData, window: tuple[dt.date, dt.date] | None) -> str:
     """Render the cross-training panel, or nothing when there is none."""
     if frames.other_activities(data.activities).empty:
         return ""
-    figure = _figure_div(figures.build_load_context_figure(data), "load-context")
+    figure = _figure_div(figures.build_load_context_figure(data, window), "load-context")
     return f"""  <section>
     <h2>Cross-training</h2>
     <p class="note">

@@ -42,6 +42,9 @@ uv run longrun anchor          # current training paces
 # Build the dashboard, then open it
 uv run longrun report
 open data/report.html
+
+# Narrow every panel to the same window, so sparse and dense series line up
+uv run longrun report --since 2025-12-01
 ```
 
 `longrun report` writes `data/report.html`. It is a normal web page: open it,

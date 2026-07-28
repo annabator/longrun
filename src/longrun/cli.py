@@ -609,6 +609,14 @@ def report_command(
         typer.Option("--output", "-o", dir_okay=False, help="Where to write the HTML dashboard."),
     ] = None,
     title: Annotated[str, typer.Option("--title", help="Page title.")] = "longrun",
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="Earliest date to show (YYYY-MM-DD). Every panel is pinned to "
+            "the same range, so sparse and dense series line up.",
+        ),
+    ] = None,
     with_cycle: Annotated[
         bool,
         typer.Option(
@@ -636,7 +644,8 @@ def report_command(
                 err=True,
             )
             raise typer.Exit(code=1)
-        written = build_report(data, destination, title=title)
+        parsed = _parse_dates([since] if since else None)
+        written = build_report(data, destination, title=title, since=parsed[0] if parsed else None)
     typer.echo(f"Wrote {written}")
     if with_cycle:
         typer.secho(

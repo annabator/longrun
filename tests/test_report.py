@@ -13,6 +13,7 @@ from longrun.report import build_report, load_report_data
 from longrun.report.figures import (
     build_cycle_figure,
     build_load_context_figure,
+    build_trend_figure,
     build_wellness_figure,
 )
 from longrun.report.frames import (
@@ -22,6 +23,7 @@ from longrun.report.frames import (
     mark_personal_bests,
     metric_series,
     other_activities,
+    report_window,
     rolling_baseline,
     running_activities,
     weekly_volume,
@@ -330,6 +332,63 @@ def test_the_load_context_figure_builds_without_other_sports(seeded_store: Store
     data = load_report_data(seeded_store)
 
     assert build_load_context_figure(data) is not None
+
+
+def test_every_dated_panel_shares_one_range(seeded_store: Store) -> None:
+    """Sparse and dense series must sit on the same timeline.
+
+    A week of readings auto-scaling to its own week, beside two years of
+    parkruns, is exactly what makes a shared-timeline view useless.
+    """
+    since = dt.date(2025, 12, 1)
+    data = load_report_data(seeded_store)
+    window = report_window(data, since)
+
+    figure = build_trend_figure(data, window)
+
+    layout = figure.to_plotly_json()["layout"]
+    ranges = {
+        tuple(axis["range"])
+        for name, axis in layout.items()
+        if name.startswith("xaxis") and axis.get("range")
+    }
+    assert len(ranges) == 1
+    assert ranges.pop()[0].startswith("2025-12-01")
+
+
+def test_the_window_starts_where_asked(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    window = report_window(data, dt.date(2025, 12, 1))
+
+    assert window is not None
+    start, end = window
+    assert start == dt.date(2025, 12, 1)
+    assert end > start
+
+
+def test_no_window_leaves_the_axes_auto_ranging(seeded_store: Store) -> None:
+    data = load_report_data(seeded_store)
+
+    assert report_window(data, None) is None
+    layout = build_trend_figure(data, None).to_plotly_json()["layout"]
+    assert all(not axis.get("range") for name, axis in layout.items() if name.startswith("xaxis"))
+
+
+def test_narrowing_the_view_does_not_move_the_personal_best(seeded_store: Store) -> None:
+    """The range is set on the axis, not by dropping rows.
+
+    Filtering first would make the fastest run inside the window look like a
+    personal best when the real one sits just outside it.
+    """
+    data = load_report_data(seeded_store)
+    marked = mark_personal_bests(metric_series(data.tests, "parkrun_5k"))
+    best_before = marked.loc[marked["is_pb"], "value"].min()
+
+    build_trend_figure(data, report_window(data, dt.date(2026, 6, 1)))
+
+    again = mark_personal_bests(metric_series(data.tests, "parkrun_5k"))
+    assert again.loc[again["is_pb"], "value"].min() == best_before
 
 
 def test_duration_formatting() -> None:
